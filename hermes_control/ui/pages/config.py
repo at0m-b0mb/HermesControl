@@ -259,7 +259,7 @@ class ConfigPage(Page):
         split = QHBoxLayout()
         split.setSpacing(16)
         self._sections = QListWidget()
-        self._sections.setFixedWidth(260)
+        self._sections.setFixedWidth(310)
         self._sections.currentItemChanged.connect(self._on_section)
         split.addWidget(self._sections)
 
@@ -316,7 +316,7 @@ class ConfigPage(Page):
         self._sections.blockSignals(True)
         self._sections.clear()
         for section in schema.sections:
-            options = grouped.get(section, [])
+            options = self._visible(grouped.get(section, []))
             if not options:
                 continue
             item = QListWidgetItem(f"{section}   ({len(options)})")
@@ -359,7 +359,27 @@ class ConfigPage(Page):
         self._sections.setEnabled(False)
         self._render(self._schema.search(text)[:160], searching=True)
 
+    def _visible(self, options: list[confschema.Option]) -> list[confschema.Option]:
+        """Drop container keys whose children are already shown.
+
+        Offering `database` as a YAML blob directly above `database.journal_mode`
+        invites two editors to disagree about one value. A map with no children
+        in the schema (an open-ended dict like `terminal.docker_env`) is kept,
+        because there it is the only way to edit the thing.
+        """
+        if self._schema is None:
+            return options
+        parents = {o.path.rsplit(".", 1)[0] for o in self._schema.options
+                   if "." in o.path}
+        return [o for o in options
+                if not (o.kind == "map" and o.path in parents)]
+
     def _render(self, options: list[confschema.Option], searching: bool = False) -> None:
+        # A container's own prose explains the whole group, so hiding the
+        # container must not take its explanation with it.
+        preamble = [o for o in options
+                    if o not in self._visible(options) and o.help]
+        options = self._visible(options)
         while self._body_layout.count():
             item = self._body_layout.takeAt(0)
             if item.widget():
@@ -374,6 +394,12 @@ class ConfigPage(Page):
         if searching:
             self._body_layout.addWidget(
                 w.label(f"{len(options)} matching options", "Label"))
+        else:
+            for container in preamble:
+                note = w.Card(container.path, flat=True)
+                note.add(w.label(container.help, "Faint", wrap=True))
+                self._body_layout.addWidget(note)
+                self._body_layout.addWidget(w.spacer(12))
 
         for option in options:
             row = OptionRow(option, self.app.mode, self._body)
