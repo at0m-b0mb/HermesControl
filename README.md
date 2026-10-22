@@ -4,6 +4,10 @@ A desktop control panel for [Nous Research's Hermes Agent](https://github.com/No
 
 Hermes Agent does the thinking. This app is the console in front of it.
 
+**[at0m-b0mb.github.io/HermesControl](https://at0m-b0mb.github.io/HermesControl/)**
+
+![Hermes Control](images/social-preview.png)
+
 ![Runtime, light](docs/screens/light-runtime.png)
 
 ---
