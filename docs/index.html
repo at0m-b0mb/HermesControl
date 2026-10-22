@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermes Control — every setting, one window</title>
+<meta name="description" content="A desktop control panel for Nous Research's Hermes Agent. Installs it isolated, runs it in the background, and exposes every option it documents — Windows, macOS and Linux.">
+<meta property="og:title" content="Hermes Control — every setting, one window">
+<meta property="og:description" content="A desktop control panel for Nous Research's Hermes Agent. Installs it isolated, runs it in the background, and exposes every option it documents.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://at0m-b0mb.github.io/HermesControl/">
+<meta property="og:image" content="https://raw.githubusercontent.com/at0m-b0mb/HermesControl/main/images/social-preview.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/at0m-b0mb/HermesControl/main/images/social-preview.png">
+<link rel="icon" href="assets/mark.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F3F1EC; --surface:#FFFFFF; --sunken:#EBE7DE;
+  --ink:#1B1813; --muted:#575144; --faint:#6B6554;
+  --rule:#DCD6C9; --rule-strong:#C4BCAA;
+  --brass:#7A5D18; --shine:#C39B24; --wash:#F7F0DC;
+  --good:#2C6249; --good-wash:#E9F3ED;
+  --warn:#8A5410; --warn-wash:#FAF0DF;
+  --alert:#8C1F16; --alert-wash:#FBE9E7;
+  --serif:"Source Serif 4",Iowan Old Style,Palatino,Georgia,serif;
+  --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
+  --paper:#000000; --surface:#131312; --sunken:#0A0A09;
+  --ink:#F3F0E9; --muted:#B8B2A6; --faint:#A6A096;
+  --rule:#2B2B28; --rule-strong:#3D3C38;
+  --brass:#D9B75C; --shine:#F1C84B; --wash:#221D0E;
+  --good:#67BE94; --good-wash:#0D1F16;
+  --warn:#DDA356; --warn-wash:#251A0B;
+  --alert:#EE8B82; --alert-wash:#2A100E;
+}}
+:root[data-theme="dark"]{
+  --paper:#000000; --surface:#131312; --sunken:#0A0A09;
+  --ink:#F3F0E9; --muted:#B8B2A6; --faint:#A6A096;
+  --rule:#2B2B28; --rule-strong:#3D3C38;
+  --brass:#D9B75C; --shine:#F1C84B; --wash:#221D0E;
+  --good:#67BE94; --good-wash:#0D1F16;
+  --warn:#DDA356; --warn-wash:#251A0B;
+  --alert:#EE8B82; --alert-wash:#2A100E;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:86px}  /* the header is sticky; without this an anchor lands under it */
+body{margin:0;background:var(--paper);color:var(--ink);
+     font-family:var(--sans);font-size:17px;line-height:1.65;
+     -webkit-font-smoothing:antialiased}
+.wrap{max-width:1000px;margin:0 auto;padding:0 24px}
+a{color:var(--brass)}
+.top{border-bottom:1px solid var(--rule);padding:18px 0;position:sticky;top:0;
+     background:var(--paper);z-index:10}
+.top .wrap{display:flex;align-items:center;gap:14px}
+.top img{width:34px;height:34px}
+.wordmark{font-family:var(--serif);font-size:19px;font-weight:600;
+          letter-spacing:2.4px;text-transform:uppercase}
+.tagline{color:var(--faint);font-size:12px;letter-spacing:1.6px;
+         text-transform:uppercase;margin-left:auto}
+.theme{background:none;border:1px solid var(--rule-strong);color:var(--muted);
+       border-radius:3px;padding:5px 11px;font:inherit;font-size:13px;
+       cursor:pointer}
+.theme:hover{border-color:var(--brass);color:var(--ink)}
+.hero{padding:72px 0 44px}
+h1{font-family:var(--serif);font-weight:400;font-size:54px;line-height:1.1;
+   margin:0 0 20px;letter-spacing:-.5px}
+.lede{font-size:21px;color:var(--muted);max-width:40em;margin:0 0 26px}
+.badges{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:28px}
+.badge{font-size:11px;letter-spacing:1.1px;text-transform:uppercase;
+       font-weight:600;color:var(--brass);background:var(--wash);
+       border:1px solid var(--rule);border-radius:999px;padding:4px 11px}
+.cta{display:flex;flex-wrap:wrap;gap:10px}
+.cta a{display:inline-block;padding:10px 20px;border-radius:4px;
+       text-decoration:none;font-weight:600;font-size:15px}
+.primary{background:var(--brass);color:var(--paper);border:1px solid var(--brass)}
+.ghost{border:1px solid var(--rule-strong);color:var(--ink)}
+section{padding:40px 0;border-top:1px solid var(--rule)}
+h2{font-family:var(--serif);font-weight:400;font-size:31px;margin:0 0 8px}
+h3{font-size:16px;margin:26px 0 4px}
+p{max-width:44em}
+.sub{color:var(--faint);margin-top:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+      gap:18px;margin-top:22px}
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:6px;
+      padding:20px}
+.card h3{margin:0 0 6px;font-size:15px}
+.card p{margin:0;font-size:15px;color:var(--muted)}
+.n{font-family:var(--serif);font-size:13px;color:var(--brass);
+   letter-spacing:1.4px;display:block;margin-bottom:8px}
+figure{margin:26px 0 0}
+figure img{width:100%;border:1px solid var(--rule);border-radius:6px;display:block}
+figcaption{color:var(--faint);font-size:13px;margin-top:8px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:720px){.pair{grid-template-columns:1fr}h1{font-size:38px}}
+table{width:100%;border-collapse:collapse;margin-top:18px;font-size:15px}
+th{text-align:left;font-size:11px;letter-spacing:1.1px;text-transform:uppercase;
+   color:var(--faint);font-weight:600;border-bottom:1px solid var(--rule);
+   padding:8px 10px 8px 0}
+td{padding:9px 10px 9px 0;border-bottom:1px solid var(--rule);
+   vertical-align:top;color:var(--muted)}
+td.k{color:var(--ink);font-weight:600;white-space:nowrap}
+td.m{font-family:var(--mono);font-size:14px;color:var(--ink)}
+.pass{color:var(--good);font-weight:600}
+.fail{color:var(--alert);font-weight:600}
+pre{background:var(--sunken);border:1px solid var(--rule);border-radius:6px;
+    padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:14px;
+    line-height:1.6}
+.note{background:var(--wash);border:1px solid var(--rule);border-left:3px solid var(--shine);
+      border-radius:4px;padding:16px 18px;margin-top:22px}
+.note p{margin:0;font-size:15px}
+footer{border-top:1px solid var(--rule);padding:30px 0 56px;color:var(--faint);
+       font-size:14px}
+</style>
+</head>
+<body>
+
+<div class="top"><div class="wrap">
+  <img src="assets/mark.png" alt="">
+  <span class="wordmark">Hermes Control</span>
+  <span class="tagline">Agent control</span>
+  <button class="theme" id="t">Theme</button>
+</div></div>
+
+<div class="wrap">
+
+<div class="hero">
+  <h1>Every setting Hermes documents,<br>in one window.</h1>
+  <p class="lede">A desktop control panel for <a href="https://github.com/NousResearch/hermes-agent">Nous Research's Hermes Agent</a>. It installs the agent without disturbing anything else on the machine, keeps it running, and gives you every option it ships with — on Windows, macOS and Linux, from one codebase.</p>
+  <div class="badges">
+    <span class="badge">Python</span><span class="badge">PySide6</span>
+    <span class="badge">Windows · macOS · Linux</span><span class="badge">MIT</span>
+    <span class="badge">v1.0.1</span>
+  </div>
+  <div class="cta">
+    <a class="primary" href="https://github.com/at0m-b0mb/HermesControl">View on GitHub</a>
+    <a class="ghost" href="https://github.com/at0m-b0mb/HermesControl/releases/latest">Latest release</a>
+  </div>
+</div>
+
+<section>
+  <h2>Why a fourth interface</h2>
+  <p class="sub">Hermes already ships a terminal UI, a web dashboard and an Electron app. Three things they leave on the table.</p>
+  <div class="grid">
+    <div class="card"><span class="n">ONE</span>
+      <h3>Its installer can bury something</h3>
+      <p>Hermes keeps everything under <code>HERMES_HOME</code>, defaulting to <code>~/.hermes</code>. If anything already owns that path, the stock one-liner lands on top of it. This installs to a sibling and passes <code>HERMES_HOME</code> explicitly on every command.</p></div>
+    <div class="card"><span class="n">TWO</span>
+      <h3>"Every setting", literally</h3>
+      <p>The editor contains no list of settings. It derives its schema from the annotated <code>config.yaml</code> your install shipped with — 239 options across 42 sections — so it describes your version, including options added later.</p></div>
+    <div class="card"><span class="n">THREE</span>
+      <h3>Local models have a trap</h3>
+      <p>Hermes refuses any context window under 64,000 tokens. Ollama serves 32,768. Left alone that is a turn that dies a minute in. Here it is a verdict beside the model, before you pick it.</p></div>
+  </div>
+  <figure>
+    <img src="assets/light-runtime.png" alt="The Runtime page, showing build details and an Isolation panel naming both the managed home and the upstream default.">
+    <figcaption>Runtime leads with isolation, because “where did my data go” is the worst question a tool can leave you asking.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>The 64,000-token floor</h2>
+  <p>This is the finding that justified the app. Hermes enforces a minimum context window in <code>agent_init</code> and refuses to start below it. Ollama's default is half of that, and several widely used local models were never trained past 40K — so the failure arrives late, as a stack trace in a log, long after you chose the model.</p>
+  <p>Measured on the build machine, straight out of Ollama's <code>/api/show</code>:</p>
+  <table>
+    <tr><th>Model</th><th>Real window</th><th>Size</th><th>Verdict</th><th>One trivial turn</th></tr>
+    <tr><td class="m">qwen3.5-abliterated:35b</td><td class="m">262,144</td><td>23.9 GB</td><td class="pass">clears</td><td>461 s</td></tr>
+    <tr><td class="m">llama3.1:latest</td><td class="m">131,072</td><td>4.9 GB</td><td class="pass">clears</td><td>31 s</td></tr>
+    <tr><td class="m">qwen3-abliterated:8b-v2</td><td class="m">40,960</td><td>5.0 GB</td><td class="fail">refused</td><td>—</td></tr>
+    <tr><td class="m">qwen2.5:7b</td><td class="m">32,768</td><td>4.7 GB</td><td class="fail">refused</td><td>—</td></tr>
+  </table>
+  <div class="note"><p><strong>The subtle part.</strong> <code>model.ollama_num_ctx</code> is sent to Ollama uncapped, so setting it to 65,536 satisfies Hermes even for a model whose trained window is smaller. It appears to work while being misconfigured. The Models page reads the real window rather than trusting the setting.</p></div>
+  <figure>
+    <img src="assets/light-models.png" alt="The Models page listing local Ollama models with their real context windows; three are marked TOO SMALL with their Use buttons disabled.">
+    <figcaption>Three of five models marked unusable before a turn is ever spent on them.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>The ribbon</h2>
+  <p>The meter on the Console is the one thing here no other tool could show, because it is made of Hermes's own mechanic. Hermes does not truncate a long conversation — past <code>compression.threshold</code> of the window it rewrites the middle into a summary and carries on. The ribbon draws the window, the live token count, the threshold where that happens, and the target it compacts down to. You see a rewrite coming instead of discovering it afterwards.</p>
+  <div class="pair">
+    <figure><img src="assets/light-console.png" alt="The Console page in the light theme, with the context ribbon above the transcript."><figcaption>Console, light</figcaption></figure>
+    <figure><img src="assets/dark-console.png" alt="The same Console page in the true-black dark theme."><figcaption>Console, dark</figcaption></figure>
+  </div>
+</section>
+
+<section>
+  <h2>Eleven pages, in Hermes's own vocabulary</h2>
+  <table>
+    <tr><td class="k">Runtime</td><td>Version, channel, commit, interpreter. Isolation stated explicitly. Gateway start/stop/restart. Host prerequisites.</td></tr>
+    <tr><td class="k">Console</td><td>Chat, streamed token by token, with the live context-budget ribbon.</td></tr>
+    <tr><td class="k">Models</td><td>Local servers probed live; 22 hosted providers with the credential each needs and whether it is set.</td></tr>
+    <tr><td class="k">Soul</td><td><code>SOUL.md</code> — the agent's identity, first slot in its system prompt.</td></tr>
+    <tr><td class="k">Skills</td><td>Installed procedures, including the ones the agent wrote for itself.</td></tr>
+    <tr><td class="k">Memory</td><td>The two curated files injected into every session, with their character budgets.</td></tr>
+    <tr><td class="k">Cron</td><td>Scheduled jobs, and whether the gateway is actually up to run them.</td></tr>
+    <tr><td class="k">Gateway</td><td>The one process serving every messaging channel.</td></tr>
+    <tr><td class="k">Config</td><td>All 239 options, searchable, carrying upstream's own help text.</td></tr>
+    <tr><td class="k">Doctor</td><td>Hermes's own checks, and its logs.</td></tr>
+    <tr><td class="k">Colophon</td><td>What it is built from, and the decisions worth stating.</td></tr>
+  </table>
+  <figure>
+    <img src="assets/dark-config.png" alt="The Config page in dark mode, listing options by section with upstream help text beneath each control.">
+    <figcaption>Config, dark. The section list, the SET / NOT SET state, and upstream's prose — none of it written by hand here.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>How it talks to Hermes</h2>
+  <p>Deliberately mixed, and the choice per operation is about what stays true when Hermes changes underneath.</p>
+  <table>
+    <tr><td class="k">Writes</td><td>Through <code>hermes config set</code>, which validates, migrates, and decides whether a key belongs in <code>config.yaml</code> or <code>.env</code>. Re-implementing that judgement would mean re-implementing it badly.</td></tr>
+    <tr><td class="k">Reads</td><td>Straight off disk — config, cron jobs, skills, and the session database opened read-only. Faster than spawning a process, and it survives a reflowed table.</td></tr>
+    <tr><td class="k">Chat</td><td><code>--format stream-json</code>, the one surface Hermes documents as machine-readable.</td></tr>
+  </table>
+  <p style="margin-top:18px">In the version this was built against, <code>--json</code> is <em>rejected</em> on <code>status</code> and <code>cron</code>, and <code>hermes tools</code> refuses to run without a terminal — which is why the mix is what it is rather than JSON everywhere.</p>
+</section>
+
+<section>
+  <h2>Install</h2>
+  <p>Python 3.10+, git and curl (PowerShell on Windows). Hermes's own installer brings its own pinned <code>uv</code> and fetches Node itself, so the host needs none of those.</p>
+<pre>git clone https://github.com/at0m-b0mb/HermesControl.git
+cd HermesControl
+./run.sh          # Windows: .\run.ps1</pre>
+  <p>First run creates the virtual environment, installs PySide6, and opens the window. If Hermes Agent is not installed yet, the Runtime page shows where it will go before anything is written.</p>
+</section>
+
+<section>
+  <h2>What is verified, and what is not</h2>
+  <p>On macOS 26, Python 3.13, PySide6 6.12 / Qt 6.12, against Hermes Agent v0.22.4:</p>
+  <table>
+    <tr><td class="k">Isolation</td><td>Installed into <code>~/.hermes-agent</code>, leaving an unrelated <code>~/.hermes</code> byte-identical by SHA-256.</td></tr>
+    <tr><td class="k">Rendering</td><td>All 11 pages render in both themes with no exceptions.</td></tr>
+    <tr><td class="k">Contrast</td><td>99 tests pass, checking every text pairing against WCAG AA in light and dark.</td></tr>
+    <tr><td class="k">A real turn</td><td>Ollama → <code>llama3.1</code> → streamed, exit 0, 31 s.</td></tr>
+  </table>
+  <div class="note"><p><strong>Not verified:</strong> Windows and Linux. Both are implemented behind a single platform module, but neither has been run on those systems.</p></div>
+</section>
+
+<footer>
+  <p>MIT. Hermes Agent is MIT-licensed work by <a href="https://github.com/NousResearch/hermes-agent">Nous Research</a>; this is a separate control panel, not a fork, and it adds no model of its own.</p>
+  <p>Built by <a href="https://github.com/at0m-b0mb">at0m-b0mb</a> · <a href="https://github.com/at0m-b0mb/HermesControl">Source</a></p>
+</footer>
+
+</div>
+
+<script>
+(function(){
+  var root=document.documentElement, b=document.getElementById('t');
+  var k='hc-theme', saved=null;
+  try{saved=localStorage.getItem(k)}catch(e){}
+  if(saved){root.setAttribute('data-theme',saved)}
+  function now(){
+    var a=root.getAttribute('data-theme');
+    if(a) return a;
+    return matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';
+  }
+  b.addEventListener('click',function(){
+    var next=now()==='dark'?'light':'dark';
+    root.setAttribute('data-theme',next);
+    try{localStorage.setItem(k,next)}catch(e){}
+  });
+})();
+</script>
+</body>
+</html>
