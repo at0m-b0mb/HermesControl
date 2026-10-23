@@ -17,5 +17,5 @@ Layout, bottom up:
 * :mod:`ui`         — Qt. Nothing below this line imports it.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __all__ = ["__version__"]
