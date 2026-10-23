@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QLineEdit, QVBoxLayout, QWidget
 
+from pathlib import Path
+
 from ... import platforms
 from .. import widgets as w
 from ..shell import Page
@@ -83,8 +85,7 @@ class SkillsPage(Page):
                 (skill.get("description") or "").strip()[:150] or "no description",
                 "Faint", wrap=True)
             reveal = w.button("Reveal", "Quiet",
-                              lambda p=skill["path"]: platforms.reveal(__import__(
-                                  "pathlib").Path(p)))
+                              lambda p=skill["path"]: platforms.reveal(Path(p)))
             self._list_box.addWidget(w.row(name, description, w.spacer(), reveal,
                                            stretch_last=False))
 

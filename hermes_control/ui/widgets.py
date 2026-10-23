@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, QSize, Signal
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy,
@@ -197,7 +197,7 @@ class Badge(QLabel):
     """A short, word-only tag: where a model runs, whether a key is set."""
 
     def __init__(self, text: str, token: str = "idle", parent: QWidget | None = None):
-        super().__init__(text)
+        super().__init__(text, parent)
         self._token = token
         self._mode = theme.LIGHT
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)

@@ -11,7 +11,6 @@ asking.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from ... import platforms
@@ -68,12 +67,13 @@ class RuntimePage(Page):
             "The gateway is one process serving every messaging platform you "
             "connect, and it runs the cron schedule. Chat from this app does "
             "not need it.", "Faint", wrap=True))
-        self._gateway_actions = w.row(
-            w.button("Start", "Primary", lambda: self._gateway("start")),
-            w.button("Stop", "", lambda: self._gateway("stop")),
-            w.button("Restart", "", lambda: self._gateway("restart")),
-        )
-        services.add(self._gateway_actions)
+        # Held as attributes so the live state can switch them: offering
+        # "Start" on a gateway that is already up invites a confusing no-op.
+        self._gw_start = w.button("Start", "Primary", lambda: self._gateway("start"))
+        self._gw_stop = w.button("Stop", "", lambda: self._gateway("stop"))
+        self._gw_restart = w.button("Restart", "", lambda: self._gateway("restart"))
+        services.add(w.row(self._gw_start, self._gw_stop, self._gw_restart,
+                           w.spacer()))
         layout.addWidget(services)
 
         # --- host ----------------------------------------------------------
@@ -144,13 +144,23 @@ class RuntimePage(Page):
                 "cannot be disturbed.")
 
         status = data["status"]
-        if status is not None:
-            running = status.gateway_running
+        known = status is not None
+        running = bool(status and status.gateway_running)
+        if known:
             self._gateway_dot.set_state(
                 "running" if running else "stopped",
                 "running" if running else "stopped")
         else:
             self._gateway_dot.set_state("absent", "unavailable")
+        self._gw_start.setEnabled(known and not running)
+        self._gw_stop.setEnabled(known and running)
+        self._gw_restart.setEnabled(known and running)
+        # The primary weight belongs on whichever action is actually available.
+        self._gw_start.setObjectName("Primary" if not running else "")
+        self._gw_restart.setObjectName("Primary" if running else "")
+        for b in (self._gw_start, self._gw_restart):
+            b.style().unpolish(b)
+            b.style().polish(b)
 
         while self._host_box.count():
             item = self._host_box.takeAt(0)
@@ -196,7 +206,7 @@ class RuntimePage(Page):
 
     def _after(self, result, what: str) -> None:
         head = (result.stdout or result.stderr or "").strip().splitlines()
-        summary = next((l.strip() for l in head if l.strip()), "")
+        summary = next((line.strip() for line in head if line.strip()), "")
         self._message.setText(
             f"{what}: {'ok' if result.ok else result.message}"
             + (f" — {summary[:160]}" if summary else ""))

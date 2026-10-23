@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QPlainTextEdit, QSpinBox, QVBoxLayout, QWidget,
 )
 
-from ... import confschema, theme
+from ... import confschema
 from .. import widgets as w
 from ..shell import Page
 
@@ -327,6 +327,11 @@ class ConfigPage(Page):
         self._count.setText(
             f"{len(schema.options)} options · {active} set · "
             f"schema v{schema.config_version}")
+        # A refresh can land while the user is mid-search — reading the config
+        # takes a moment and typing does not wait for it. Re-rendering the
+        # selected section here would silently throw their results away, so
+        # the search wins when there is one.
+        query = self._search.text().strip()
         if self._sections.count():
             target = 0
             for index in range(self._sections.count()):
@@ -334,7 +339,13 @@ class ConfigPage(Page):
                         Qt.ItemDataRole.UserRole) == self._section:
                     target = index
                     break
+            self._sections.blockSignals(bool(query))
             self._sections.setCurrentRow(target)
+            self._sections.blockSignals(False)
+        if query:
+            self._on_search(query)
+        elif not self._sections.count():
+            self._render([])
         self._message.setText("")
 
     def _failed(self, error: str) -> None:

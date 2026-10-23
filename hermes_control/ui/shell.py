@@ -9,7 +9,6 @@ Dashboard/Settings/Advanced triplet every generated interface reaches for.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QSettings, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
@@ -42,7 +41,7 @@ class Page(QWidget):
     #: Small word above the page title.
     eyebrow = ""
 
-    def __init__(self, app: "Shell", parent: QWidget | None = None):
+    def __init__(self, app: Shell, parent: QWidget | None = None):
         super().__init__(parent)
         self.app = app
         self.hermes: Hermes = app.hermes

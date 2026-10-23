@@ -16,7 +16,7 @@ fix exists.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLineEdit, QVBoxLayout, QWidget
 
 from ... import providers
 from .. import widgets as w

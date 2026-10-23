@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import html
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QPlainTextEdit, QTextEdit, QVBoxLayout,
@@ -99,7 +98,7 @@ class ConsolePage(Page):
     # --- lifecycle ----------------------------------------------------------
 
     def refresh(self) -> None:
-        self.jobs.run(self._read_setup, self._setup_read, lambda e: None)
+        self.jobs.run(self._read_setup, self._setup_read, self._setup_failed)
 
     def _read_setup(self) -> dict:
         hermes = self.hermes
@@ -118,6 +117,11 @@ class ConsolePage(Page):
             "threshold": compression.get("threshold", 0.5),
             "target": compression.get("target_ratio", 0.2),
         }
+
+    def _setup_failed(self, error: str) -> None:
+        # Swallowing this silently left the page claiming "no model set" with
+        # no way to tell that from a genuinely unset model.
+        self._state.setText(f"Could not read the model setup: {error}")
 
     def _setup_read(self, data: dict) -> None:
         self._window = data["window"]

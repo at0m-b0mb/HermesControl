@@ -45,10 +45,11 @@ class GatewayPage(Page):
         self._control = w.Card("Process", accent=True)
         self._dot = w.StatusDot("idle", "checking")
         self._control.add(self._dot)
+        self._start = w.button("Start", "Primary", lambda: self._act("start"))
+        self._stop = w.button("Stop", "", lambda: self._act("stop"))
+        self._restart = w.button("Restart", "", lambda: self._act("restart"))
         self._control.add(w.row(
-            w.button("Start", "Primary", lambda: self._act("start")),
-            w.button("Stop", "", lambda: self._act("stop")),
-            w.button("Restart", "", lambda: self._act("restart")),
+            self._start, self._stop, self._restart,
             w.button("Install as a service", "Quiet", lambda: self._act("install")),
             w.spacer()))
         self._control.add(w.label(
@@ -89,6 +90,9 @@ class GatewayPage(Page):
         self._dot.set_state("running" if running else "stopped",
                             "running" if running else "stopped")
         self._dot.apply_mode(self.app.mode)
+        self._start.setEnabled(not running)
+        self._stop.setEnabled(running)
+        self._restart.setEnabled(running)
         while self._channel_box.count():
             item = self._channel_box.takeAt(0)
             if item.widget():

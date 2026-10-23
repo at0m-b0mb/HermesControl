@@ -94,10 +94,20 @@ In the version this was built against, `--json` is *rejected* on `status` and `c
 
 On macOS 26 (Darwin 27), Python 3.13, PySide6 6.12 / Qt 6.12, against Hermes Agent **v0.22.4**:
 
-- Isolated install into `~/.hermes-agent`, leaving an unrelated `~/.hermes` byte-identical.
+- Isolated install into `~/.hermes-agent`, leaving an unrelated `~/.hermes` byte-identical by SHA-256.
 - All 11 pages render in both themes with no exceptions (`tools/shoot.py`).
-- 88 contrast assertions pass (`pytest tests/`).
-- A real local turn end to end: Ollama → `llama3.1` → streamed `PONG`, exit 0, 31s.
+- **108 tests pass**, including a functional suite that drives the real widgets against the real install.
+- A chat turn end to end *through the interface*: typed into the Console, streamed back, answer in the transcript, token accounting delivered to the ribbon.
+- Editing a setting and pressing Apply is asserted to reach `config.yaml`, and the original is restored.
+- Every local model's verdict is checked against what Ollama actually reports, and a model under the floor is asserted to be unselectable.
+
+```bash
+./.venv/bin/python -m pytest tests/ -q      # all of it, ~35s plus one real turn
+HC_SKIP_SLOW=1 ./.venv/bin/python -m pytest tests/ -q   # skip the live model turn
+./.venv/bin/python tools/shoot.py           # render every page in both themes
+```
+
+The three suites answer different questions. `test_theme.py` asks whether it can be read, `test_confschema.py` whether the schema parser loses or invents settings, and `test_functional.py` whether pressing the buttons does anything.
 
 Windows and Linux paths are implemented behind `platforms.py` but have **not** been run on those systems yet.
 

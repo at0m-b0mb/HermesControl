@@ -267,9 +267,16 @@ def reveal(path: Path) -> None:
     """Show a file or folder in the platform's file manager."""
     try:
         if IS_MAC:
-            subprocess.Popen(["open", "-R" if path.is_file() else "", str(path)])
+            # `-R` reveals a file in its folder; a folder is opened directly.
+            # Building the argv with a conditional *element* rather than a
+            # conditional list put an empty string in argv, which `open` is
+            # under no obligation to ignore.
+            args = ["open", "-R", str(path)] if path.is_file() else ["open", str(path)]
+            subprocess.Popen(args)
         elif IS_WINDOWS:
-            subprocess.Popen(["explorer", f"/select,{path}" if path.is_file() else str(path)])
+            args = (["explorer", f"/select,{path}"] if path.is_file()
+                    else ["explorer", str(path)])
+            subprocess.Popen(args)
         else:
             subprocess.Popen(["xdg-open", str(path if path.is_dir() else path.parent)])
     except OSError:
