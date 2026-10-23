@@ -61,7 +61,11 @@ CHOICES: tuple[Choice, ...] = (
     Choice("Shell and files", "terminal,file,web",
            "Run commands and edit files. No browser, no image tools."),
     Choice("Web only", "web",
-           "Fetch and search. Nothing local."),
+           "Fetch and search, nothing local — and much the fastest. Every "
+           "enabled tool's definition goes into the prompt on every turn, so "
+           "the full set costs around 3,500 tokens before you have said "
+           "anything: measured here, 4,096 input tokens and 11s to first "
+           "token against 585 and 2s. Worth choosing if you mostly talk."),
 )
 
 
