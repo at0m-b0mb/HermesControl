@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import html
 import re
+from pathlib import Path
 
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -44,6 +45,7 @@ class ConsolePage(Page):
         self._window = 0
         self._tool_depth = 0
         self._ready = False
+        self._workdir = Path.home()
 
         layout = QVBoxLayout(self)
         pad = 32
@@ -80,6 +82,14 @@ class ConsolePage(Page):
         options.addWidget(self._toolsets)
         self._yolo = QCheckBox("skip approval prompts")
         options.addWidget(self._yolo)
+        options.addSpacing(14)
+        # Where the agent's file and shell tools operate. Without this the
+        # turn inherits the *gateway's* working directory -- the Hermes
+        # checkout -- so "write notes.txt" landed inside the installation.
+        options.addWidget(w.label("IN", "Label"))
+        self._workdir_label = w.label("", "MonoFaint")
+        options.addWidget(self._workdir_label)
+        options.addWidget(w.button("Change", "Quiet", self._choose_workdir))
         options.addStretch(1)
         self._session_label = w.label("", "Faint")
         options.addWidget(self._session_label)
@@ -167,8 +177,27 @@ class ConsolePage(Page):
             if not self._transcript.toPlainText():
                 self._state.setText("")
 
+        self._show_workdir()
         self.ribbon.set_budget(0, self._window, self._threshold, self._target)
         self.ribbon.apply_mode(self.app.mode)
+
+    def _choose_workdir(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        chosen = QFileDialog.getExistingDirectory(
+            self, "Where should the agent work?", str(self._workdir))
+        if chosen:
+            self._workdir = Path(chosen)
+            self._show_workdir()
+
+    def _show_workdir(self) -> None:
+        text = str(self._workdir)
+        home = str(Path.home())
+        if text.startswith(home):
+            text = "~" + text[len(home):]
+        if len(text) > 34:
+            text = "…" + text[-33:]
+        self._workdir_label.setText(text)
+        self._workdir_label.setToolTip(str(self._workdir))
 
     def _tools_changed(self, label: str) -> None:
         choice = toolsets.choice_for(label)
@@ -219,6 +248,7 @@ class ConsolePage(Page):
             toolsets=choice.value if choice else None,
             resume=self._session or None,
             yolo=self._yolo.isChecked(),
+            cwd=self._workdir,
         )
         self._stream = stream
         self._send.setEnabled(False)
@@ -277,9 +307,7 @@ class ConsolePage(Page):
             return
 
         if kind == "tool_result":
-            body = (event.raw.get("content") or event.raw.get("result")
-                    or event.text or "")
-            body = str(body)
+            body = str(event.output)
             if len(body) > 700:
                 body = body[:700] + f"\n… {len(body) - 700} more characters"
             self._append(body or "(no output)", "ink_muted", label="result")

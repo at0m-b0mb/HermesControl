@@ -144,3 +144,84 @@ def test_tool_support_matches_what_ollama_reports() -> None:
                              json={"model": model.name}, timeout=20).json()
         caps = payload.get("capabilities") or []
         assert model.supports_tools == ("tools" in caps), model.name
+
+
+# --- the provider value we write --------------------------------------------
+
+#: Hermes's own doctor rejects anything outside its canonical list. The three
+#: local aliases work at run time and fail that check, which is how a working
+#: setup ends up reporting a problem the user cannot find.
+DOCTOR_REJECTS = ("ollama", "vllm", "llamacpp")
+
+
+def test_we_never_write_an_alias_as_the_provider() -> None:
+    from hermes_control import providers
+    assert providers.probe_ollama().provider_key not in DOCTOR_REJECTS
+    for alias in DOCTOR_REJECTS:
+        assert providers.canonical_provider(alias) == "custom"
+    # lmstudio is itself canonical and must survive unchanged.
+    assert providers.canonical_provider("lmstudio") == "lmstudio"
+
+
+def test_aliases_are_still_recognised_as_local() -> None:
+    """Someone's existing config may hold an alias; the UI must not call it hosted."""
+    from hermes_control import providers
+    for alias in DOCTOR_REJECTS:
+        assert providers.is_local(alias)
+    assert providers.is_local("custom")
+    assert not providers.is_local("openrouter")
+
+
+def test_neither_page_writes_the_alias() -> None:
+    """Grep the two call sites, since this is a value not a code path."""
+    root = Path(__file__).resolve().parents[1] / "hermes_control" / "ui" / "pages"
+    for name in ("models.py", "setup.py"):
+        source = (root / name).read_text(encoding="utf-8")
+        assert '"model.provider": "ollama"' not in source, (
+            f"{name} writes the alias, which makes hermes doctor report a "
+            f"problem on a working setup")
+
+
+# --- how big a window to ask for --------------------------------------------
+
+def test_a_large_model_is_not_asked_for_a_huge_window() -> None:
+    """num_ctx sizes the KV cache, which is allocated up front.
+
+    Asking a 30B for 131,072 tokens killed the Ollama runner mid-turn with
+    "model runner has unexpectedly stopped ... resource limitations", and
+    Hermes retried straight into the same wall. The floor is the default;
+    headroom is opt-in.
+    """
+    from hermes_control.providers import (
+        DEFAULT_NUM_CTX, LocalModel, MIN_CONTEXT_WINDOW, suggested_num_ctx,
+    )
+    big = LocalModel(name="qwen3:30b-a3b", server="Ollama",
+                     context=262_144, size_bytes=18_600_000_000)
+    assert suggested_num_ctx(big) == DEFAULT_NUM_CTX
+    assert suggested_num_ctx(big) >= MIN_CONTEXT_WINDOW
+
+
+def test_a_small_model_still_gets_headroom() -> None:
+    from hermes_control.providers import (
+        GENEROUS_NUM_CTX, LocalModel, suggested_num_ctx,
+    )
+    small = LocalModel(name="llama3.2:1b", server="Ollama",
+                       context=131_072, size_bytes=1_300_000_000)
+    assert suggested_num_ctx(small) == GENEROUS_NUM_CTX
+
+
+def test_we_never_ask_for_more_than_the_model_has() -> None:
+    """Ollama sends an explicit num_ctx as-is, so an over-ask is a silent lie."""
+    from hermes_control.providers import LocalModel, suggested_num_ctx
+    for size in (1_000_000_000, 20_000_000_000):
+        model = LocalModel(name="x", server="Ollama", context=70_000,
+                           size_bytes=size)
+        assert suggested_num_ctx(model) <= model.context
+
+
+def test_an_unknown_window_still_clears_the_floor() -> None:
+    from hermes_control.providers import (
+        LocalModel, MIN_CONTEXT_WINDOW, suggested_num_ctx,
+    )
+    model = LocalModel(name="x", server="Ollama", context=0, size_bytes=0)
+    assert suggested_num_ctx(model) >= MIN_CONTEXT_WINDOW

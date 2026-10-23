@@ -396,3 +396,49 @@ def test_the_console_reads_the_session_id_from_the_result_event(app) -> None:
     assert page._session == "local-abc123", (
         "the result event's session id was ignored, so --resume would never "
         "be passed")
+
+
+# --- where the agent works --------------------------------------------------
+
+def test_tool_result_output_is_read_from_the_right_key() -> None:
+    """Hermes puts a tool's output under `output`, not `content`.
+
+    Reading the wrong key returned "" for every tool call, so the transcript
+    showed each tool running and producing nothing — which looks like a
+    broken tool rather than a broken reader.
+    """
+    from hermes_control.cli import Event
+    event = Event("tool_result", {"name": "write_file",
+                                  "output": '{"error": "missing path"}'})
+    assert event.output == '{"error": "missing path"}'
+    assert event.tool == "write_file"
+    # Other shapes still work.
+    assert Event("tool_result", {"content": "legacy"}).output == "legacy"
+    assert Event("tool_result", {"result": "older"}).output == "older"
+    assert Event("tool_result", {}).output == ""
+
+
+@needs_hermes
+def test_chat_scopes_the_turn_with_in(tmp_path) -> None:
+    """Popen's cwd is not enough when a gateway is running.
+
+    `hermes chat` hands the turn to the gateway process, whose own working
+    directory is the Hermes checkout — so a relative path from a file tool
+    landed inside the installation. --in scopes the turn itself.
+    """
+    stream = HERMES.chat("hi", cwd=tmp_path)
+    try:
+        assert "--in" in stream.argv, "the working directory was not passed"
+        assert stream.argv[stream.argv.index("--in") + 1] == str(tmp_path)
+    finally:
+        stream.cancel()
+
+
+@needs_hermes
+def test_the_console_has_a_working_directory(app) -> None:
+    application, shell = app
+    page = shell.page("Console")
+    shell.show_page("Console")
+    settle(application, 3.0)
+    assert page._workdir is not None
+    assert page._workdir_label.text(), "the working directory is not shown"

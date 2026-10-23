@@ -245,9 +245,10 @@ class SetupPage(Page):
                     "warn", "a usable model is available but not selected",
                     f"Ready to use: {', '.join(n for n, _ in usable)}")
                 best = max(usable, key=lambda item: item[1])
+                best_model = next((m for m in models if m.name == best[0]), None)
                 self._s3.actions().addWidget(w.button(
                     f"Use {best[0]}", "Primary",
-                    lambda n=best[0], c=best[1]: self._use(n, c)))
+                    lambda n=best[0], c=best[1], m=best_model: self._use(n, c, m)))
             self._s3.actions().addWidget(w.button(
                 "Choose another", "Quiet", lambda: self.app.show_page("Models")))
             self._s3.actions().addStretch(1)
@@ -273,14 +274,17 @@ class SetupPage(Page):
 
     # --- actions ------------------------------------------------------------
 
-    def _use(self, name: str, window: int) -> None:
+    def _use(self, name: str, window: int, model=None) -> None:
+        num_ctx = (providers.suggested_num_ctx(model) if model is not None
+                   else max(min(window, providers.GENEROUS_NUM_CTX),
+                            providers.MIN_CONTEXT_WINDOW))
         pairs = {
-            "model.provider": "ollama",
+            # Canonical, not the "ollama" alias -- see providers.probe_ollama.
+            "model.provider": "custom",
             "model.base_url": f"{self._ollama.host}/v1",
             "model.default": name,
             "model.api_key": "ollama",
-            "model.ollama_num_ctx": min(
-                max(window, providers.MIN_CONTEXT_WINDOW), 131_072),
+            "model.ollama_num_ctx": num_ctx,
         }
 
         def work():

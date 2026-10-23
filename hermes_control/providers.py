@@ -125,6 +125,10 @@ class LocalServer:
     models: list[LocalModel] = field(default_factory=list)
     error: str = ""
 
+    @property
+    def is_ollama(self) -> bool:
+        return self.name == "Ollama"
+
 
 def _get(url: str, timeout: float = 2.5) -> Any:
     try:
@@ -142,7 +146,15 @@ def probe_ollama(host: str = "http://localhost:11434") -> LocalServer:
     model's trained context length, which is the ceiling on what Ollama can
     serve regardless of what ``num_ctx`` asks for.
     """
-    server = LocalServer("Ollama", "ollama", f"{host}/v1")
+    # provider is "custom", not "ollama". Hermes accepts "ollama" as an alias
+    # at run time -- status resolves it to custom and inference works -- but
+    # `hermes doctor` validates the raw config value against its canonical
+    # list and reports "model.provider 'ollama' is unknown" as a problem the
+    # user then goes hunting for. Nothing is lost by writing the canonical
+    # value: ollama_num_ctx is read straight from model config and is not
+    # gated on the provider, and Ollama itself is detected from base_url
+    # (agent/model_metadata.py::_is_ollama_server).
+    server = LocalServer("Ollama", "custom", f"{host}/v1")
     tags = _get(f"{host}/api/tags")
     if tags is None:
         server.error = f"nothing answering on {host}"
@@ -282,5 +294,47 @@ def context_verdict(model: LocalModel | None, configured_num_ctx: Any = None) ->
         fix_value=min(model.context, 131_072))
 
 
+#: Provider values Hermes's own doctor accepts for a local server. "ollama",
+#: "vllm" and "llamacpp" work as aliases but are rejected by `hermes doctor`,
+#: so they are recognised here and never written.
+CANONICAL_LOCAL = ("custom", "lmstudio")
+LOCAL_ALIASES = ("ollama", "vllm", "llamacpp")
+
+
+#: Above this, a model's KV cache is large enough that asking for a big
+#: context window starts to compete with the weights for memory.
+LARGE_MODEL_BYTES = 12_000_000_000
+
+#: A comfortable default window. Hermes needs 64,000; asking for much more
+#: costs memory in proportion to the model's size and buys nothing until a
+#: conversation is actually that long.
+DEFAULT_NUM_CTX = 65_536
+GENEROUS_NUM_CTX = 131_072
+
+
+def suggested_num_ctx(model: LocalModel) -> int:
+    """How large a window to ask Ollama for when selecting this model.
+
+    Asking for the largest window the model supports is the obvious choice and
+    the wrong one. ``num_ctx`` sizes the KV cache, which is allocated up front
+    and scales with the model: a 30B asked for 131,072 tokens made the Ollama
+    runner die mid-turn with "model runner has unexpectedly stopped ...
+    resource limitations", and Hermes then retried into the same wall.
+
+    So the floor is the default and headroom is opt-in. A small model gets a
+    generous window because it can afford one; anything large gets what Hermes
+    requires and no more, and the Config page can raise it.
+    """
+    window = model.context or MIN_CONTEXT_WINDOW
+    if model.size_bytes and model.size_bytes >= LARGE_MODEL_BYTES:
+        return min(max(DEFAULT_NUM_CTX, MIN_CONTEXT_WINDOW), window)
+    return min(max(GENEROUS_NUM_CTX, MIN_CONTEXT_WINDOW), window)
+
+
 def is_local(provider_key: str) -> bool:
-    return provider_key in ("ollama", "lmstudio", "vllm", "llamacpp", "custom")
+    return provider_key in CANONICAL_LOCAL + LOCAL_ALIASES
+
+
+def canonical_provider(provider_key: str) -> str:
+    """The value to write. Aliases become `custom` so doctor stays clean."""
+    return "custom" if provider_key in LOCAL_ALIASES else provider_key

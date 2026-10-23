@@ -289,7 +289,7 @@ class ModelsPage(Page):
         badge.apply_mode(mode)
         remove = w.button("Remove", "Quiet",
                           lambda n=model.name: self._delete(n))
-        remove.setEnabled(server.provider_key == "ollama" and not in_use
+        remove.setEnabled(server.is_ollama and not in_use
                           and not self._pulling)
         remove.setToolTip("Delete this model from disk"
                           if remove.isEnabled() else
@@ -418,15 +418,14 @@ class ModelsPage(Page):
     def _use_local(self, server: providers.LocalServer,
                    model: providers.LocalModel) -> None:
         pairs = {
-            "model.provider": server.provider_key,
+            "model.provider": providers.canonical_provider(server.provider_key),
             "model.base_url": server.base_url,
             "model.default": model.name,
         }
-        if server.provider_key == "ollama":
+        if server.is_ollama:
             pairs["model.api_key"] = "ollama"
             if model.context:
-                pairs["model.ollama_num_ctx"] = min(
-                    max(model.context, providers.MIN_CONTEXT_WINDOW), 131_072)
+                pairs["model.ollama_num_ctx"] = providers.suggested_num_ctx(model)
         self._set_keys(pairs)
 
     def _use_cloud(self, provider: providers.CloudProvider) -> None:

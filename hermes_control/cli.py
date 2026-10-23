@@ -92,6 +92,22 @@ class Event:
         return self.raw.get("name") or self.raw.get("tool") or ""
 
     @property
+    def output(self) -> str:
+        """A tool_result's payload.
+
+        Hermes puts it under ``output``. Reading ``content``/``result``
+        instead -- the names most agent protocols use -- silently yielded an
+        empty string for every tool call, so the transcript showed each tool
+        running and producing nothing. The other keys stay as fallbacks in
+        case a plugin emits a different shape.
+        """
+        for key in ("output", "content", "result"):
+            value = self.raw.get(key)
+            if value not in (None, ""):
+                return value if isinstance(value, str) else str(value)
+        return self.text
+
+    @property
     def tokens(self) -> dict[str, int]:
         return self.raw.get("tokens") or {}
 
@@ -542,6 +558,13 @@ class Hermes:
             args += ["-s", skill]
         if resume:
             args += ["--resume", resume]
+        if cwd:
+            # Passing cwd to Popen is not enough. When a gateway is running,
+            # `hermes chat` hands the turn to that process, whose own working
+            # directory is the Hermes checkout -- so a relative path from a
+            # tool landed inside the installation rather than anywhere the
+            # user meant. --in scopes the turn itself.
+            args += ["--in", str(cwd)]
         if max_turns:
             args += ["--max-turns", str(max_turns)]
         if yolo:
