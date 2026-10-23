@@ -135,8 +135,12 @@ class SetupPage(Page):
         provider = hermes.config_value("model.provider") if installed else None
         local_models = []
         if self._ollama.reachable:
-            for name in self._ollama.installed():
-                local_models.append((name, self._ollama.context_window(name)))
+            # Probe through providers so the usability test here is the same
+            # one the Models page applies: window *and* tool support. Asking
+            # only for the window would call a tool-less model ready.
+            for server in providers.probe_local():
+                if server.name == "Ollama":
+                    local_models = server.models
         return {
             "prereqs": platforms.check_prerequisites(),
             "free": platforms.disk_free_gb(self._installer.hermes_home),
@@ -196,10 +200,13 @@ class SetupPage(Page):
 
         # --- step three: a model -------------------------------------------
         self._s3.clear_actions()
-        usable = [(n, c) for n, c in data["local_models"]
-                  if c >= providers.MIN_CONTEXT_WINDOW]
-        too_small = [(n, c) for n, c in data["local_models"]
-                     if c and c < providers.MIN_CONTEXT_WINDOW]
+        models = data["local_models"]
+        usable = [(m.name, m.context) for m in models
+                  if providers.context_verdict(m, 999_999).ok]
+        too_small = [(m.name, m.context) for m in models
+                     if m.context and m.context < providers.MIN_CONTEXT_WINDOW
+                     and m.supports_tools is not False]
+        no_tools = [m.name for m in models if m.supports_tools is False]
         if not data["installed"]:
             self._s3.set_state("idle", "waiting on step two", "")
         elif not data["ollama"]:
@@ -219,6 +226,9 @@ class SetupPage(Page):
             if too_small:
                 detail += ("  Too small: "
                            + ", ".join(f"{n} ({c:,})" for n, c in too_small))
+            if no_tools:
+                detail += ("  Cannot use tools: " + ", ".join(no_tools)
+                           + " — these chat fine but cannot be agents.")
             self._s3.set_state("warn", "no usable model", detail)
             self._s3.actions().addWidget(w.button(
                 "Get a model", "Primary", lambda: self.app.show_page("Models")))

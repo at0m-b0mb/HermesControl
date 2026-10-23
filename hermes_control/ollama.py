@@ -70,8 +70,14 @@ SUGGESTED: tuple[Suggestion, ...] = (
     Suggestion("qwen3:30b-a3b", 262_144, "~18 GB",
                "Mixture-of-experts: large window, only a few billion "
                "parameters active per token."),
-    Suggestion("deepseek-r1:14b", 131_072, "~9 GB",
-               "A reasoning model, slower per turn by design."),
+)
+
+#: Popular models with no tool-calling support. They chat perfectly well and
+#: cannot be agents: Hermes sends a tool list on every request, so the turn is
+#: refused with HTTP 400 before a token is produced. This list was learned the
+#: hard way — deepseek-r1 was suggested here until it was tried.
+KNOWN_NO_TOOLS: tuple[str, ...] = (
+    "deepseek-r1", "deepcoder", "openthinker", "marco-o1", "qwq",
 )
 
 #: Popular models that do NOT clear the floor. Shown so the choice is informed

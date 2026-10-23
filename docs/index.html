@@ -134,7 +134,7 @@ footer{border-top:1px solid var(--rule);padding:30px 0 56px;color:var(--faint);
   <div class="badges">
     <span class="badge">Python</span><span class="badge">PySide6</span>
     <span class="badge">Windows · macOS · Linux</span><span class="badge">MIT</span>
-    <span class="badge">v1.4.0</span>
+    <span class="badge">v1.5.0</span>
   </div>
   <div class="cta">
     <a class="primary" href="https://github.com/at0m-b0mb/HermesControl">View on GitHub</a>
@@ -180,8 +180,9 @@ footer{border-top:1px solid var(--rule);padding:30px 0 56px;color:var(--faint);
 </section>
 
 <section>
-  <h2>The 64,000-token floor</h2>
+  <h2>Two requirements, not one</h2>
   <p>This is the finding that justified the app. Hermes enforces a minimum context window in <code>agent_init</code> and refuses to start below it. Ollama's default is half of that, and several widely used local models were never trained past 40K — so the failure arrives late, as a stack trace in a log, long after you chose the model.</p>
+  <div class="note"><p><strong>And a second one that is easier to miss.</strong> Hermes sends a tool list on <em>every</em> request, so a model without tool-calling support is refused with HTTP 400 before producing a single token — however large its window is. <code>deepseek-r1</code> is the common case: a 131,072-token window, chats perfectly well, cannot be an agent. Ollama reports this as a capability, so the app now checks it and says which requirement failed.</p></div>
   <p>Measured on the build machine, straight out of Ollama's <code>/api/show</code>:</p>
   <table>
     <tr><th>Model</th><th>Real window</th><th>Size</th><th>Verdict</th><th>One trivial turn</th></tr>
@@ -255,7 +256,7 @@ cd HermesControl
   <table>
     <tr><td class="k">Isolation</td><td>Installed into <code>~/.hermes-agent</code>, leaving an unrelated <code>~/.hermes</code> byte-identical by SHA-256.</td></tr>
     <tr><td class="k">Rendering</td><td>All 12 pages render in both themes, with no exceptions raised anywhere — including inside Qt callbacks, which do not reach the caller and so used to pass unnoticed.</td></tr>
-    <tr><td class="k">Tests</td><td>213 pass, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and WCAG AA contrast checks in both themes.</td></tr>
+    <tr><td class="k">Tests</td><td>216 pass, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and WCAG AA contrast checks in both themes.</td></tr>
     <tr><td class="k">A real turn</td><td>Ollama → <code>llama3.1</code> → streamed, exit 0, 31 s.</td></tr>
   </table>
   <div class="note"><p><strong>Not verified:</strong> Windows and Linux. Both are implemented behind a single platform module, but neither has been run on those systems.</p></div>

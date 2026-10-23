@@ -91,6 +91,21 @@ class LocalModel:
     size_bytes: int = 0
     family: str = ""
     detail: str = ""
+    capabilities: tuple[str, ...] = ()   # as Ollama reports them
+
+    @property
+    def supports_tools(self) -> bool | None:
+        """Can the model be given tools? ``None`` when the server won't say.
+
+        This is the second hard requirement and it is easy to miss, because a
+        model without it answers ordinary chat perfectly well. Hermes is an
+        agent: it sends a tool list on every request, so a model that cannot
+        accept one fails the turn immediately with HTTP 400 and never produces
+        a token. ``deepseek-r1`` is the popular example.
+        """
+        if not self.capabilities:
+            return None
+        return "tools" in self.capabilities
 
     @property
     def size_label(self) -> str:
@@ -152,6 +167,9 @@ def probe_ollama(host: str = "http://localhost:11434") -> LocalServer:
             except Exception:
                 info = None
         if isinstance(info, dict):
+            caps = info.get("capabilities")
+            if isinstance(caps, list):
+                model.capabilities = tuple(str(c) for c in caps)
             model_info = info.get("model_info") or {}
             for key, value in model_info.items():
                 if key.endswith(".context_length") and isinstance(value, int):
@@ -213,6 +231,18 @@ def context_verdict(model: LocalModel | None, configured_num_ctx: Any = None) ->
     if model is None:
         return Verdict(False, "warn", "No model selected.")
 
+    # Tool support first: a model without it fails instantly and absolutely,
+    # whereas a small window at least fails with an explanation. Checking the
+    # window first would report the lesser problem.
+    if model.supports_tools is False:
+        return Verdict(
+            False, "error", "Cannot use tools.",
+            f"{model.name} has no tool-calling support, and Hermes sends a "
+            f"tool list on every request — the turn is refused with HTTP 400 "
+            f"before a single token is produced. The model may chat perfectly "
+            f"well elsewhere; it cannot be an agent. Reasoning-only models "
+            f"such as deepseek-r1 are the common case.")
+
     if model.server != "Ollama":
         return Verdict(True, "ok", "Served by LM Studio.",
                        "Hermes reads the window from the server.")
@@ -237,9 +267,10 @@ def context_verdict(model: LocalModel | None, configured_num_ctx: Any = None) ->
         asked = 0
 
     if asked >= MIN_CONTEXT_WINDOW:
+        unknown = " Tool support unknown." if model.supports_tools is None else ""
         return Verdict(True, "ok",
                        f"Window {model.context:,}, asking for {asked:,}.",
-                       "Ready to use.")
+                       "Ready to use." + unknown)
 
     return Verdict(
         False, "warn",

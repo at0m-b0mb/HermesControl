@@ -105,3 +105,42 @@ def test_deleting_something_that_does_not_exist_is_reported() -> None:
     ok, message = LIVE.delete("hermes-control-test-nonexistent:zzz")
     assert ok is False
     assert "not found" in message.lower() or "404" in message
+
+
+# --- tool support -----------------------------------------------------------
+
+def test_no_suggestion_is_on_the_no_tools_list() -> None:
+    """deepseek-r1 was suggested here until it was actually tried.
+
+    It has a 131K window and chats perfectly well, so every check this app
+    made said it was fine — and every turn failed with HTTP 400 before a
+    token, because Hermes sends a tool list on every request.
+    """
+    from hermes_control.ollama import KNOWN_NO_TOOLS
+    for suggestion in SUGGESTED:
+        stem = suggestion.name.split(":")[0]
+        assert stem not in KNOWN_NO_TOOLS, (
+            f"{suggestion.name} cannot use tools and must not be suggested")
+
+
+@needs_ollama
+def test_capabilities_are_read_from_ollama() -> None:
+    from hermes_control.providers import probe_ollama
+    server = probe_ollama()
+    if not server.models:
+        pytest.skip("no models installed")
+    assert any(m.capabilities for m in server.models), (
+        "no model reported capabilities; tool support cannot be judged")
+
+
+@needs_ollama
+def test_tool_support_matches_what_ollama_reports() -> None:
+    import httpx
+    from hermes_control.providers import probe_ollama
+    for model in probe_ollama().models:
+        if model.supports_tools is None:
+            continue
+        payload = httpx.post("http://localhost:11434/api/show",
+                             json={"model": model.name}, timeout=20).json()
+        caps = payload.get("capabilities") or []
+        assert model.supports_tools == ("tools" in caps), model.name

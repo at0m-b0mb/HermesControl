@@ -200,7 +200,14 @@ def test_models_page_verdicts_match_ollama(app) -> None:
     assert ollama.models, "Ollama reachable but reported no models"
     for model in ollama.models:
         verdict = providers.context_verdict(model, 65_536)
-        if model.context and model.context < providers.MIN_CONTEXT_WINDOW:
+        if model.supports_tools is False:
+            # A second, independent requirement: Hermes sends tools on every
+            # request, so a model without them fails before producing a token
+            # no matter how large its window is.
+            assert not verdict.ok, f"{model.name} has no tools but passed"
+            assert verdict.state == "error"
+            assert "tools" in verdict.headline.lower()
+        elif model.context and model.context < providers.MIN_CONTEXT_WINDOW:
             assert not verdict.ok, f"{model.name} is under the floor but passed"
             assert verdict.state == "error"
             assert not verdict.fix, "no setting can rescue an undertrained window"
