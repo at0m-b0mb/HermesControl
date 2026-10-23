@@ -48,6 +48,19 @@ The meter on the Console is the one thing here no other tool could show, because
 
 ---
 
+## Which models can actually be agents
+
+Two of Hermes's requirements are checkable — a 64,000-token window and tool-calling support, both of which Ollama reports. The third is not: whether the model can *use* tools competently. Several popular models pass both checks, answer ordinary chat perfectly, and still cannot complete a two-step job.
+
+```bash
+python3 tools/model_bench.py            # every installed model
+python3 tools/model_bench.py hermes3    # or just some
+```
+
+Each model gets the same task in a throwaway directory — read a file, write it back with a line added — and is scored on whether the file actually changed. Two steps rather than one on purpose: a single write can be luck, while read-then-write needs the model to carry a result from one call into the next, which is where the weak ones fall over.
+
+---
+
 ## Getting a model
 
 Hermes needs a model, and most of the obvious choices don't qualify — its 64,000-token floor rules out `qwen2.5`, `phi4`, `mistral:7b` and plenty of others. So the Models page has a short library of models chosen for exactly one reason: each clears the floor.
