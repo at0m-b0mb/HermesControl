@@ -71,6 +71,10 @@ class Score:
     seconds: float = 0.0
     calls: list[str] = None
     note: str = ""
+    #: The first tool error, if any. Without it a failure reads as "the model
+    #: did nothing", when what actually happened is usually a malformed call
+    #: that Hermes rejected with a precise explanation the model then ignored.
+    first_error: str = ""
 
     @property
     def verdict(self) -> str:
@@ -98,6 +102,10 @@ def bench(hermes: Hermes, model: providers.LocalModel) -> Score:
         for event in stream.events():
             if event.type == "tool_use":
                 score.calls.append(event.tool)
+            elif event.type == "tool_result" and not score.first_error:
+                payload = str(event.output)
+                if '"error"' in payload or '"success": false' in payload:
+                    score.first_error = payload[:160]
             if time.monotonic() - start > BUDGET:
                 stream.cancel()
                 score.note = f"over {BUDGET:.0f}s"
@@ -143,6 +151,8 @@ def main(argv: list[str]) -> int:
             detail = f"{detail} [{', '.join(score.calls[:4])}]".strip()
         print(f"{score.model:<30} {score.window:>9,} {tools:>6} {secs:>7}  "
               f"{score.verdict:<10} {detail}"[:140], flush=True)
+        if score.first_error:
+            print(f"{'':>56}why: {score.first_error}"[:140], flush=True)
 
     working = [s for s in scores if s.edited]
     print()
