@@ -36,7 +36,8 @@ Hermes already ships a terminal UI, a web dashboard and an Electron app, so a fo
 | **Skills** | Installed procedures, including ones the agent wrote for itself. |
 | **Memory** | The two curated files injected into every session. |
 | **Cron** | Scheduled jobs, and whether the gateway is up to run them. |
-| **Gateway** | The process serving every messaging channel. |
+| **Gateway** | The process serving every messaging channel, and a full email setup form with a staged connection test. |
+| **Connectors** | The ~54 apps Hermes can act on, and the one Nous Portal sign-in they all depend on. |
 | **Config** | All ~240 options, searchable, with upstream's help text. |
 | **Doctor** | Hermes's own checks, and its logs. |
 | **Colophon** | What this is built from, and the decisions worth stating. |
@@ -63,6 +64,21 @@ hf.co/user/repo:Q4_K_M
 The published context window gets a model onto your disk; the **measured** one decides whether it can be used. After every download the app re-reads the real window from the model itself and tells you if it fell short — because a wrong published figure is precisely the trap this is here to prevent.
 
 > Ollama publishes no search or library API (`/api/library` and `/api/search` both 404), so this is a curated list plus a name field, not a browsable catalogue. Pretending otherwise would mean screen-scraping something that would rot.
+
+---
+
+## Connectors and email
+
+**Connectors** are the third-party apps Hermes can act on — Linear, Notion, Slack, Stripe and ~50 more. Every one of them is brokered by **Nous Portal**, so none work until that account is signed in. The connector listing never says this; each row just reads `not connected`, which looks like fifty separate problems rather than one missing sign-in. The Connectors page leads with exactly that.
+
+Signing in, and connecting each app, are browser flows against your own accounts with your own passwords and second factors. The app opens them and reports the outcome — it does not handle those credentials.
+
+**Email** is a first-class gateway platform: Hermes polls an IMAP mailbox and replies over SMTP, so anyone you allow can simply write to the agent. The Gateway page has the full form, with host settings filled in from your address, and everything stored in `.env` rather than `config.yaml` because the keys are `UPPER_SNAKE`.
+
+Two things that form knows, which save a long detour:
+
+- **Gmail, Outlook, iCloud and Yahoo all refuse ordinary passwords.** You need an app password, and the error they return for the account password is an unhelpful generic failure. The form says so before the attempt.
+- **"It doesn't work" has several very different causes** — DNS, a blocked port, TLS, a wrong password, IMAP disabled on the account. The connection test runs in stages and reports the first one that failed, by name, instead of one flat refusal.
 
 ---
 
@@ -116,7 +132,7 @@ On macOS 26 (Darwin 27), Python 3.13, PySide6 6.12 / Qt 6.12, against Hermes Age
 
 - Isolated install into `~/.hermes-agent`, leaving an unrelated `~/.hermes` byte-identical by SHA-256.
 - All 11 pages render in both themes with no exceptions (`tools/shoot.py`).
-- **190 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
+- **213 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
 - A chat turn end to end *through the interface*: typed into the Console, streamed back, answer in the transcript, token accounting delivered to the ribbon.
 - Editing a setting and pressing Apply is asserted to reach `config.yaml`, and the original is restored.
 - Every local model's verdict is checked against what Ollama actually reports, and a model under the floor is asserted to be unselectable.

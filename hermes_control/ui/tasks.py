@@ -107,6 +107,11 @@ class JobRunner(QObject):
         job.finished.connect(lambda: self._live.remove(job)
                              if job in self._live else None)
 
+    @property
+    def busy(self) -> bool:
+        """Is any worker still running? Lets a caller wait on real work."""
+        return any(job.isRunning() for job in self._live)
+
     def wait_all(self, msec: int = 3000) -> None:
         for job in list(self._live):
             job.wait(msec)

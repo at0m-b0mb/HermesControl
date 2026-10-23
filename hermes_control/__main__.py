@@ -16,6 +16,7 @@ from . import __version__, theme
 from .cli import Hermes
 from .ui.pages.colophon import ColophonPage
 from .ui.pages.config import ConfigPage
+from .ui.pages.connectors import ConnectorsPage
 from .ui.pages.console import ConsolePage
 from .ui.pages.doctor import DoctorPage
 from .ui.pages.gateway import GatewayPage
@@ -32,7 +33,7 @@ from .ui.shell import Shell
 PAGES = (
     SetupPage, RuntimePage, ConsolePage, ModelsPage,   # Runtime
     SoulPage, SkillsPage, MemoryPage,           # Agent
-    SchedulePage, GatewayPage,                  # Automation
+    SchedulePage, GatewayPage, ConnectorsPage,  # Automation
     ConfigPage, DoctorPage, ColophonPage,       # Installation
 )
 

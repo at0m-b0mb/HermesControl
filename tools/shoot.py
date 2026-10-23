@@ -28,11 +28,25 @@ from hermes_control.__main__ import PAGES, build  # noqa: E402
 OUT = ROOT / "docs" / "screens"
 
 
-def settle(app: QApplication, seconds: float) -> None:
-    """Pump the event loop so worker results actually land before we render."""
+def settle(app: QApplication, seconds: float, shell=None) -> None:
+    """Pump the event loop until the page has actually finished loading.
+
+    A fixed sleep was wrong in both directions: too long for a static page and
+    too short for one that shells out twice, which is how the Connectors page
+    was first captured mid-load showing "checking" and an empty list. Waiting
+    on the job runner, then settling briefly for the repaint, tracks the real
+    work instead of guessing at it.
+    """
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 40)
+        if shell is not None and not shell.jobs.busy:
+            # Workers are done; let their results paint.
+            quiet = time.monotonic() + 0.45
+            while time.monotonic() < quiet:
+                app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 20)
+                time.sleep(0.02)
+            return
         time.sleep(0.02)
 
 
@@ -53,7 +67,7 @@ def main() -> int:
     app, shell = build([sys.argv[0]])
     shell.resize(1280, 860)
     shell.show()
-    settle(app, 1.0)
+    settle(app, 15.0, shell)
 
     failures: list[str] = []
     written: list[Path] = []
@@ -61,12 +75,12 @@ def main() -> int:
     for mode in (theme.LIGHT, theme.DARK):
         shell._choice = mode          # exercise the real path, not a shortcut
         shell.apply_appearance()
-        settle(app, 0.4)
+        settle(app, 10.0, shell)
         for page_class in PAGES:
             name = page_class.title
             try:
                 shell.show_page(name)
-                settle(app, 2.2)
+                settle(app, 30.0, shell)
                 target = OUT / f"{mode}-{name.lower()}.png"
                 if not shell.grab().save(str(target)):
                     failures.append(f"{mode}/{name}: could not save image")

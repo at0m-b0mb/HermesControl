@@ -134,7 +134,7 @@ footer{border-top:1px solid var(--rule);padding:30px 0 56px;color:var(--faint);
   <div class="badges">
     <span class="badge">Python</span><span class="badge">PySide6</span>
     <span class="badge">Windows · macOS · Linux</span><span class="badge">MIT</span>
-    <span class="badge">v1.3.0</span>
+    <span class="badge">v1.4.0</span>
   </div>
   <div class="cta">
     <a class="primary" href="https://github.com/at0m-b0mb/HermesControl">View on GitHub</a>
@@ -207,7 +207,7 @@ footer{border-top:1px solid var(--rule);padding:30px 0 56px;color:var(--faint);
 </section>
 
 <section>
-  <h2>Twelve pages, in Hermes's own vocabulary</h2>
+  <h2>Thirteen pages, in Hermes's own vocabulary</h2>
   <table>
     <tr><td class="k">Setup</td><td>Four steps from nothing to a working agent: host check, install, a model, done.</td></tr>
     <tr><td class="k">Runtime</td><td>Version, channel, commit, interpreter. Isolation stated explicitly. Gateway start/stop/restart. Host prerequisites.</td></tr>
@@ -217,6 +217,7 @@ footer{border-top:1px solid var(--rule);padding:30px 0 56px;color:var(--faint);
     <tr><td class="k">Skills</td><td>Installed procedures, including the ones the agent wrote for itself.</td></tr>
     <tr><td class="k">Memory</td><td>The two curated files injected into every session, with their character budgets.</td></tr>
     <tr><td class="k">Cron</td><td>Scheduled jobs, and whether the gateway is actually up to run them.</td></tr>
+    <tr><td class="k">Connectors</td><td>The ~54 apps Hermes can act on, and the single Nous Portal sign-in they all depend on.</td></tr>
     <tr><td class="k">Gateway</td><td>The one process serving every messaging channel.</td></tr>
     <tr><td class="k">Config</td><td>All 239 options, searchable, carrying upstream's own help text.</td></tr>
     <tr><td class="k">Doctor</td><td>Hermes's own checks, and its logs.</td></tr>
@@ -254,7 +255,7 @@ cd HermesControl
   <table>
     <tr><td class="k">Isolation</td><td>Installed into <code>~/.hermes-agent</code>, leaving an unrelated <code>~/.hermes</code> byte-identical by SHA-256.</td></tr>
     <tr><td class="k">Rendering</td><td>All 12 pages render in both themes, with no exceptions raised anywhere — including inside Qt callbacks, which do not reach the caller and so used to pass unnoticed.</td></tr>
-    <tr><td class="k">Tests</td><td>161 pass, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and WCAG AA contrast checks in both themes.</td></tr>
+    <tr><td class="k">Tests</td><td>213 pass, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and WCAG AA contrast checks in both themes.</td></tr>
     <tr><td class="k">A real turn</td><td>Ollama → <code>llama3.1</code> → streamed, exit 0, 31 s.</td></tr>
   </table>
   <div class="note"><p><strong>Not verified:</strong> Windows and Linux. Both are implemented behind a single platform module, but neither has been run on those systems.</p></div>

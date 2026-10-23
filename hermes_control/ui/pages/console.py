@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import providers, theme
+from ... import providers, theme, toolsets
 from ...cli import ChatStream, Event
 from .. import widgets as w
 from ..shell import Page
@@ -69,8 +69,14 @@ class ConsolePage(Page):
         options.setSpacing(10)
         options.addWidget(w.label("TOOLS", "Label"))
         self._toolsets = QComboBox()
-        self._toolsets.addItems(["default", "none", "core", "all"])
-        self._toolsets.setFixedWidth(120)
+        # These used to be "default / none / core / all", three of which this
+        # app invented: `none` and `core` are rejected by Hermes and failed
+        # every turn they were selected for. See hermes_control.toolsets.
+        for choice in toolsets.CHOICES:
+            self._toolsets.addItem(choice.label)
+        self._toolsets.setFixedWidth(190)
+        self._toolsets.setToolTip(toolsets.CHOICES[0].detail)
+        self._toolsets.currentTextChanged.connect(self._tools_changed)
         options.addWidget(self._toolsets)
         self._yolo = QCheckBox("skip approval prompts")
         options.addWidget(self._yolo)
@@ -164,6 +170,12 @@ class ConsolePage(Page):
         self.ribbon.set_budget(0, self._window, self._threshold, self._target)
         self.ribbon.apply_mode(self.app.mode)
 
+    def _tools_changed(self, label: str) -> None:
+        choice = toolsets.choice_for(label)
+        self._toolsets.setToolTip(choice.detail if choice else "")
+        if choice is not None:
+            self._state.setText(choice.detail)
+
     # --- transcript ---------------------------------------------------------
 
     def _append(self, body: str, token: str = "ink", *,
@@ -201,10 +213,10 @@ class ConsolePage(Page):
         self._pending = ""
         self._tool_depth = 0
 
-        toolsets = self._toolsets.currentText()
+        choice = toolsets.choice_for(self._toolsets.currentText())
         stream = self.hermes.chat(
             prompt,
-            toolsets=None if toolsets == "default" else toolsets,
+            toolsets=choice.value if choice else None,
             resume=self._session or None,
             yolo=self._yolo.isChecked(),
         )

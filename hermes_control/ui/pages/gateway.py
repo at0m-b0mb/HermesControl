@@ -10,8 +10,10 @@ truth about what it cannot do from here.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import (QComboBox, QLineEdit, QSpinBox,
+                               QVBoxLayout, QWidget)
 
+from ... import email as mail
 from .. import widgets as w
 from ..shell import Page
 
@@ -57,7 +59,61 @@ class GatewayPage(Page):
             "it only runs while started here.", "Faint", wrap=True))
         layout.addWidget(self._control)
 
-        channels = w.Card("Channels")
+        # --- email ----------------------------------------------------------
+        # Email has its own plugin and six settings, so it gets a form rather
+        # than a line in a table like the token-only platforms.
+        self._email = w.Card("Email")
+        self._email.add(w.label(
+            "Hermes can poll a mailbox and reply, so anyone allowed can simply "
+            "write to the agent. Settings are stored in .env, never in "
+            "config.yaml, because they are UPPER_SNAKE keys.", "Faint", wrap=True))
+
+        self._provider = QComboBox()
+        self._provider.addItems([p.label for p in mail.PROVIDERS])
+        self._provider.currentTextChanged.connect(self._provider_chosen)
+        self._address = QLineEdit()
+        self._address.setPlaceholderText("you@example.com")
+        self._address.editingFinished.connect(self._address_entered)
+        self._email.add(w.row(
+            self._labelled("PROVIDER", self._provider, 230),
+            self._labelled("ADDRESS", self._address, 320), w.spacer()))
+
+        self._password = QLineEdit()
+        self._password.setEchoMode(QLineEdit.EchoMode.Password)
+        self._password.setPlaceholderText("app password")
+        self._imap_host = QLineEdit()
+        self._imap_port = QSpinBox()
+        self._imap_port.setRange(1, 65535)
+        self._imap_port.setValue(993)
+        self._smtp_host = QLineEdit()
+        self._smtp_port = QSpinBox()
+        self._smtp_port.setRange(1, 65535)
+        self._smtp_port.setValue(587)
+        self._email.add(w.row(
+            self._labelled("PASSWORD", self._password, 260),
+            self._labelled("ALLOWED SENDERS", self._allowed_field(), 330),
+            w.spacer()))
+        self._email.add(w.row(
+            self._labelled("IMAP HOST", self._imap_host, 230),
+            self._labelled("PORT", self._imap_port, 90),
+            self._labelled("SMTP HOST", self._smtp_host, 230),
+            self._labelled("PORT", self._smtp_port, 90), w.spacer()))
+
+        # currentTextChanged does not fire for the selection a combo box is
+        # born with, so the first provider's hosts and its app-password
+        # warning would stay blank until the user picked something else.
+        self._email_note = w.label("", "Faint", wrap=True)
+        self._email.add(self._email_note)
+        self._email_status = w.label("", "Faint", wrap=True)
+        self._email.add(self._email_status)
+        self._email.add(w.row(
+            w.button("Save", "Primary", self._save_email),
+            w.button("Test connection", "", self._test_email),
+            w.spacer()))
+        self._provider_chosen(self._provider.currentText())
+        layout.addWidget(self._email)
+
+        channels = w.Card("Other channels")
         self._channel_box = QVBoxLayout()
         self._channel_box.setSpacing(4)
         channels.add_layout(self._channel_box)
@@ -76,13 +132,118 @@ class GatewayPage(Page):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(w.scroller(body))
 
+    # --- small helpers ------------------------------------------------------
+
+    @staticmethod
+    def _labelled(caption: str, widget: QWidget, width: int) -> QWidget:
+        holder = QWidget()
+        column = QVBoxLayout(holder)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(2)
+        column.addWidget(w.label(caption, "Label"))
+        column.addWidget(widget)
+        holder.setFixedWidth(width)
+        return holder
+
+    def _allowed_field(self) -> QLineEdit:
+        self._allowed = QLineEdit()
+        self._allowed.setPlaceholderText("you@example.com, colleague@example.com")
+        return self._allowed
+
+    def _provider_chosen(self, label: str) -> None:
+        provider = mail.provider_for(label)
+        if provider is None or provider.label == "Custom":
+            self._email_note.setText("")
+            return
+        self._imap_host.setText(provider.imap_host)
+        self._imap_port.setValue(provider.imap_port)
+        self._smtp_host.setText(provider.smtp_host)
+        self._smtp_port.setValue(provider.smtp_port)
+        self._email_note.setText(provider.note)
+
+    def _address_entered(self) -> None:
+        """Fill the hosts from the address, so nobody looks them up."""
+        guess = mail.guess_provider(self._address.text())
+        if guess is not None and not self._imap_host.text():
+            self._provider.setCurrentText(guess.label)
+
+    # --- email actions --------------------------------------------------------
+
+    def _email_values(self) -> dict:
+        return {
+            "EMAIL_ADDRESS": self._address.text().strip(),
+            "EMAIL_PASSWORD": self._password.text(),
+            "EMAIL_IMAP_HOST": self._imap_host.text().strip(),
+            "EMAIL_IMAP_PORT": self._imap_port.value(),
+            "EMAIL_SMTP_HOST": self._smtp_host.text().strip(),
+            "EMAIL_SMTP_PORT": self._smtp_port.value(),
+            "EMAIL_ALLOWED_USERS": self._allowed.text().strip(),
+        }
+
+    def _save_email(self) -> None:
+        values = self._email_values()
+        if not values["EMAIL_ADDRESS"] or not values["EMAIL_SMTP_HOST"]:
+            self._email_status.setText(
+                "An address and an SMTP host are the minimum.")
+            return
+        self._email_status.setText("Saving to .env…")
+
+        def work():
+            results = []
+            for key, value in values.items():
+                if value in ("", None):
+                    continue
+                results.append((key, self.hermes.set_secret(key, str(value))))
+            return results
+
+        def done(results):
+            bad = [f"{k}: {r.message}" for k, r in results if not r.ok]
+            # Never echo a value back, only the key names.
+            self._email_status.setText(
+                "; ".join(bad) if bad else
+                f"Saved {len(results)} setting(s) to .env. "
+                f"Restart the gateway for them to take effect.")
+            self.refresh()
+
+        self.jobs.run(work, done, lambda e: self._email_status.setText(e))
+
+    def _test_email(self) -> None:
+        values = self._email_values()
+        password = values["EMAIL_PASSWORD"] or self.hermes.read_env().get(
+            "EMAIL_PASSWORD", "")
+        address = values["EMAIL_ADDRESS"] or self.hermes.read_env().get(
+            "EMAIL_ADDRESS", "")
+        if not password:
+            self._email_status.setText(
+                "Enter the password first — it is only used for this test and "
+                "is never shown or logged.")
+            return
+        self._email_status.setText("Testing…")
+
+        def work():
+            return mail.check(address, password,
+                              values["EMAIL_IMAP_HOST"], values["EMAIL_IMAP_PORT"],
+                              values["EMAIL_SMTP_HOST"], values["EMAIL_SMTP_PORT"])
+
+        def done(result):
+            lines = [f"{'ok' if s.ok else 'FAILED'} — {s.name}"
+                     + (f": {s.detail}" if s.detail else "")
+                     for s in result.stages]
+            self._email_status.setText(
+                ("Mailbox reachable and sign-in accepted.\n" if result.ok
+                 else "") + "\n".join(lines))
+
+        self.jobs.run(work, done, lambda e: self._email_status.setText(e))
+
     def refresh(self) -> None:
         self.jobs.run(self._gather, self._show,
                       lambda e: self._message.setText(e))
 
     def _gather(self) -> dict:
+        env = self.hermes.read_env()
         return {"status": self.hermes.status(),
-                "secrets": set(self.hermes.read_env().keys())}
+                "secrets": set(env.keys()),
+                "secrets_full": env}
 
     def _show(self, data: dict) -> None:
         status = data["status"]
@@ -106,6 +267,24 @@ class GatewayPage(Page):
             badge.apply_mode(self.app.mode)
             self._channel_box.addWidget(w.row(
                 label, badge, w.label(how, "Faint", wrap=True), stretch_last=True))
+        env = data["secrets_full"]
+        if env.get("EMAIL_ADDRESS") and not self._address.text():
+            self._address.setText(env["EMAIL_ADDRESS"])
+            self._imap_host.setText(env.get("EMAIL_IMAP_HOST", ""))
+            self._smtp_host.setText(env.get("EMAIL_SMTP_HOST", ""))
+            self._allowed.setText(env.get("EMAIL_ALLOWED_USERS", ""))
+            for key, box in (("EMAIL_IMAP_PORT", self._imap_port),
+                             ("EMAIL_SMTP_PORT", self._smtp_port)):
+                try:
+                    box.setValue(int(env[key]))
+                except (KeyError, ValueError):
+                    pass
+        configured = all(k in env for k in mail.REQUIRED)
+        self._email_status.setText(
+            "Configured. Restart the gateway after any change."
+            if configured else
+            "Not configured yet. The password is stored in .env by Hermes and "
+            "is never displayed here.")
         self._message.setText(
             f"Platforms active: {status.platforms or 'none configured'}")
 
