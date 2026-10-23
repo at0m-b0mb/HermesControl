@@ -42,9 +42,17 @@ from hermes_control import providers  # noqa: E402
 from hermes_control.cli import Hermes  # noqa: E402
 
 SEED = "Shopping list\n- apples\n- bread\n- cheese\n"
-TASK = ("Read the file notes.txt in your working directory with read_file, "
-        "then use write_file to write it back with one extra line at the end: "
-        "- milk\nReply DONE when the file has been written.")
+#: States the goal and names no tool. An earlier version prescribed
+#: read_file then write_file, and two capable models failed it the same way:
+#: they made both calls correctly and still lost the file, because faithfully
+#: reproducing content that read_file returns line-number-prefixed
+#: ("1|Shopping list") is a transcription exercise, not an agentic one. The
+#: toolset also offers `patch`, which is the natural tool for this and which
+#: the prescription forbade. Measure the job, not obedience to one route.
+TASK = ("In your working directory there is a file notes.txt. Add a new line "
+        "'- milk' at the end of it, keeping everything already in the file. "
+        "Use whichever of your tools is best for the job. Reply DONE when the "
+        "file has been changed.")
 #: Narrow on purpose. With every toolset enabled the weaker models reach for
 #: the batch dispatcher and never recover; the question here is competence at
 #: the job, not resistance to a large menu.
