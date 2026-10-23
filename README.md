@@ -114,6 +114,14 @@ Families are resolved against the live font database at startup, so a painted wi
 
 ---
 
+## Where the agent works
+
+`hermes chat` does not necessarily run the turn in the process you started. When a gateway is running — which it is by default — the turn is handed to *that* process, whose working directory is the Hermes checkout. So an agent told to write `notes.txt` wrote it inside the installation, and a `cwd` passed to the subprocess did nothing at all.
+
+The Console therefore shows a working directory and scopes every turn to it with `--in`. Where a file lands should never be a guess.
+
+---
+
 ## How it talks to Hermes
 
 Deliberately mixed, and the choice per operation is about what stays true when Hermes changes underneath:
@@ -132,7 +140,7 @@ On macOS 26 (Darwin 27), Python 3.13, PySide6 6.12 / Qt 6.12, against Hermes Age
 
 - Isolated install into `~/.hermes-agent`, leaving an unrelated `~/.hermes` byte-identical by SHA-256.
 - All 11 pages render in both themes with no exceptions (`tools/shoot.py`).
-- **216 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
+- **226 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
 - A chat turn end to end *through the interface*: typed into the Console, streamed back, answer in the transcript, token accounting delivered to the ribbon.
 - Editing a setting and pressing Apply is asserted to reach `config.yaml`, and the original is restored.
 - Every local model's verdict is checked against what Ollama actually reports, and a model under the floor is asserted to be unselectable.
