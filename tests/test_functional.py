@@ -442,3 +442,23 @@ def test_the_console_has_a_working_directory(app) -> None:
     settle(application, 3.0)
     assert page._workdir is not None
     assert page._workdir_label.text(), "the working directory is not shown"
+
+
+def test_the_console_remembers_its_choices(app) -> None:
+    """A narrow toolset chosen because the local model needs it should stick.
+
+    Re-picking it on every launch is the kind of small friction that makes a
+    tool feel unfinished.
+    """
+    application, shell = app
+    page = shell.page("Console")
+    shell.show_page("Console")
+    settle(application, 2.0)
+    original = page._toolsets.currentText()
+    try:
+        page._toolsets.setCurrentText("Web only")
+        settle(application, 0.4)
+        assert shell.settings.value("console/toolsets") == "Web only"
+    finally:
+        page._toolsets.setCurrentText(original)
+        settle(application, 0.3)

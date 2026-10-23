@@ -45,7 +45,9 @@ class ConsolePage(Page):
         self._window = 0
         self._tool_depth = 0
         self._ready = False
-        self._workdir = Path.home()
+        saved = str(app.settings.value("console/workdir", ""))
+        self._workdir = (Path(saved) if saved and Path(saved).is_dir()
+                         else Path.home())
 
         layout = QVBoxLayout(self)
         pad = 32
@@ -78,6 +80,12 @@ class ConsolePage(Page):
             self._toolsets.addItem(choice.label)
         self._toolsets.setFixedWidth(190)
         self._toolsets.setToolTip(toolsets.CHOICES[0].detail)
+        # Remembered across restarts. Someone who has settled on a narrow
+        # toolset -- because their local model drowns in the full one -- should
+        # not have to re-pick it every time the app opens.
+        remembered = str(self.app.settings.value("console/toolsets", ""))
+        if toolsets.choice_for(remembered) is not None:
+            self._toolsets.setCurrentText(remembered)
         self._toolsets.currentTextChanged.connect(self._tools_changed)
         options.addWidget(self._toolsets)
         self._yolo = QCheckBox("skip approval prompts")
@@ -187,6 +195,7 @@ class ConsolePage(Page):
             self, "Where should the agent work?", str(self._workdir))
         if chosen:
             self._workdir = Path(chosen)
+            self.app.settings.setValue("console/workdir", chosen)
             self._show_workdir()
 
     def _show_workdir(self) -> None:
@@ -204,6 +213,7 @@ class ConsolePage(Page):
         self._toolsets.setToolTip(choice.detail if choice else "")
         if choice is not None:
             self._state.setText(choice.detail)
+            self.app.settings.setValue("console/toolsets", label)
 
     # --- transcript ---------------------------------------------------------
 
