@@ -99,6 +99,14 @@ class ModelsPage(Page):
             "Popular models that are too small for Hermes: "
             + ", ".join(f"{n} ({c:,})" for n, c in KNOWN_TOO_SMALL),
             "Faint", wrap=True))
+        self._library.add(w.label(
+            "A window and tool support are necessary, not sufficient. In "
+            "testing here, no local model from 1B to 30B completed a two-step "
+            "job — read a file, write it back with a line added — even after "
+            "being told exactly what it got wrong. They chat well and lose "
+            "the thread when the work has steps. Run tools/model_bench.py to "
+            "test a model before trusting it with real work, and prefer a "
+            "hosted provider for anything agentic.", "Faint", wrap=True))
         layout.addWidget(self._library)
 
         # --- hosted ---------------------------------------------------------

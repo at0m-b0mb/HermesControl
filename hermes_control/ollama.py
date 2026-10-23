@@ -72,6 +72,18 @@ SUGGESTED: tuple[Suggestion, ...] = (
                "parameters active per token."),
 )
 
+#: Measured on this machine with tools/model_bench.py: a two-step job (read a
+#: file, write it back with a line added), narrow toolset, scoped with --in.
+#: Not one of these completed it, including after two conversational nudges.
+#:
+#: The harness is not the problem. Hermes validates every malformed call with
+#: a precise, actionable error, refuses to overwrite a file with the
+#: line-numbered *display* text that read_file returns, and says exactly what
+#: to do instead. The models acknowledge the correction and then do not act on
+#: it. Treat "clears the window" and "supports tools" as necessary and not
+#: sufficient, and benchmark before trusting a model with real work.
+VERIFIED_AGENTIC: tuple[str, ...] = ()
+
 #: Popular models with no tool-calling support. They chat perfectly well and
 #: cannot be agents: Hermes sends a tool list on every request, so the turn is
 #: refused with HTTP 400 before a token is produced. This list was learned the
