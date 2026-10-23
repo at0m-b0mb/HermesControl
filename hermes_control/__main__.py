@@ -23,13 +23,14 @@ from .ui.pages.memory import MemoryPage
 from .ui.pages.models import ModelsPage
 from .ui.pages.runtime import RuntimePage
 from .ui.pages.schedule import SchedulePage
+from .ui.pages.setup import SetupPage
 from .ui.pages.skills import SkillsPage
 from .ui.pages.soul import SoulPage
 from .ui.shell import Shell
 
 #: Rail order. Groups are drawn from each page's ``group``.
 PAGES = (
-    RuntimePage, ConsolePage, ModelsPage,       # Runtime
+    SetupPage, RuntimePage, ConsolePage, ModelsPage,   # Runtime
     SoulPage, SkillsPage, MemoryPage,           # Agent
     SchedulePage, GatewayPage,                  # Automation
     ConfigPage, DoctorPage, ColophonPage,       # Installation

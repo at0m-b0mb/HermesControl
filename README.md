@@ -28,9 +28,10 @@ Hermes already ships a terminal UI, a web dashboard and an Electron app, so a fo
 
 | Page | |
 |---|---|
+| **Setup** | Four steps from nothing to a working agent: host check, install Hermes, get a model, done. |
 | **Runtime** | Version, channel, commit, interpreter. Isolation, stated explicitly. Gateway start/stop/restart. Host prerequisites. |
 | **Console** | Chat, streamed token by token, with a live context-budget ribbon. |
-| **Models** | Local servers probed live; ~22 hosted providers with the credential each needs and whether it is set. |
+| **Models** | Local servers probed live; a model library with one-click download and removal; ~22 hosted providers with the credential each needs. |
 | **Soul** | `SOUL.md` — the agent's identity, first slot in its system prompt. |
 | **Skills** | Installed procedures, including ones the agent wrote for itself. |
 | **Memory** | The two curated files injected into every session. |
@@ -43,6 +44,25 @@ Hermes already ships a terminal UI, a web dashboard and an Electron app, so a fo
 ### The ribbon
 
 The meter on the Console is the one thing here no other tool could show, because it is made of Hermes's own mechanic. Hermes does not truncate a long conversation — past `compression.threshold` of the window it rewrites the middle into a summary and continues. The ribbon draws the window, the live token count, the threshold where that happens, and the target it compacts down to. You can see a rewrite coming instead of discovering it afterwards.
+
+---
+
+## Getting a model
+
+Hermes needs a model, and most of the obvious choices don't qualify — its 64,000-token floor rules out `qwen2.5`, `phi4`, `mistral:7b` and plenty of others. So the Models page has a short library of models chosen for exactly one reason: each clears the floor.
+
+Downloads stream real progress from Ollama, layer by layer. Ollama reports bytes **per layer** rather than for the whole download, so the bar tracks the layer in flight and the caption counts layers — a single percentage computed from those numbers jumps backwards every time a layer completes.
+
+You can also pull anything the registry accepts by name, including a Hugging Face GGUF:
+
+```
+llama3.3:70b
+hf.co/user/repo:Q4_K_M
+```
+
+The published context window gets a model onto your disk; the **measured** one decides whether it can be used. After every download the app re-reads the real window from the model itself and tells you if it fell short — because a wrong published figure is precisely the trap this is here to prevent.
+
+> Ollama publishes no search or library API (`/api/library` and `/api/search` both 404), so this is a curated list plus a name field, not a browsable catalogue. Pretending otherwise would mean screen-scraping something that would rot.
 
 ---
 

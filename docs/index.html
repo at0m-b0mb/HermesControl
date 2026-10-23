@@ -134,13 +134,30 @@ footer{border-top:1px solid var(--rule);padding:30px 0 56px;color:var(--faint);
   <div class="badges">
     <span class="badge">Python</span><span class="badge">PySide6</span>
     <span class="badge">Windows · macOS · Linux</span><span class="badge">MIT</span>
-    <span class="badge">v1.1.0</span>
+    <span class="badge">v1.2.0</span>
   </div>
   <div class="cta">
     <a class="primary" href="https://github.com/at0m-b0mb/HermesControl">View on GitHub</a>
     <a class="ghost" href="https://github.com/at0m-b0mb/HermesControl/releases/latest">Latest release</a>
   </div>
 </div>
+
+<section>
+  <h2>Four steps, then it works</h2>
+  <p class="sub">Setup checks the host, installs Hermes Agent, finds you a model, and tells you when you are done.</p>
+  <p>The install runs Nous's own installer and streams its output into the panel rather than hiding it behind a spinner — a three-gigabyte install that prints nothing for four minutes looks broken, and the output is the only way to see which stage failed when one does. It installs to a managed home and never to the upstream default, so a Hermes that already exists on the machine is untouched.</p>
+  <figure>
+    <img src="assets/light-setup.png" alt="The Setup page showing four numbered steps, each satisfied, ending in an Open the Console button.">
+    <figcaption>Each step has one state and one action. Nothing is enabled before the step it depends on.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>Getting a model</h2>
+  <p>Most obvious choices don't qualify — the 64,000-token floor rules out <code>qwen2.5</code>, <code>phi4</code>, <code>mistral:7b</code> and plenty more. So the library is short and chosen for exactly one reason: every entry clears the floor. Downloads stream real progress from Ollama, and you can pull anything the registry accepts by name, including a Hugging Face GGUF via <code>hf.co/user/repo:Q4_K_M</code>.</p>
+  <div class="note"><p><strong>Published gets it downloaded; measured decides if it works.</strong> After every download the app re-reads the real context window from the model itself and says so if it fell short. A wrong published figure is precisely the trap this exists to prevent.</p></div>
+  <p style="margin-top:18px;color:var(--faint);font-size:15px">Ollama publishes no search or library API — <code>/api/library</code> and <code>/api/search</code> both 404 — so this is a curated list plus a name field, not a browsable catalogue. Pretending otherwise would mean screen-scraping something that would rot.</p>
+</section>
 
 <section>
   <h2>Why a fourth interface</h2>
@@ -190,8 +207,9 @@ footer{border-top:1px solid var(--rule);padding:30px 0 56px;color:var(--faint);
 </section>
 
 <section>
-  <h2>Eleven pages, in Hermes's own vocabulary</h2>
+  <h2>Twelve pages, in Hermes's own vocabulary</h2>
   <table>
+    <tr><td class="k">Setup</td><td>Four steps from nothing to a working agent: host check, install, a model, done.</td></tr>
     <tr><td class="k">Runtime</td><td>Version, channel, commit, interpreter. Isolation stated explicitly. Gateway start/stop/restart. Host prerequisites.</td></tr>
     <tr><td class="k">Console</td><td>Chat, streamed token by token, with the live context-budget ribbon.</td></tr>
     <tr><td class="k">Models</td><td>Local servers probed live; 22 hosted providers with the credential each needs and whether it is set.</td></tr>
@@ -235,8 +253,8 @@ cd HermesControl
   <p>On macOS 26, Python 3.13, PySide6 6.12 / Qt 6.12, against Hermes Agent v0.22.4:</p>
   <table>
     <tr><td class="k">Isolation</td><td>Installed into <code>~/.hermes-agent</code>, leaving an unrelated <code>~/.hermes</code> byte-identical by SHA-256.</td></tr>
-    <tr><td class="k">Rendering</td><td>All 11 pages render in both themes with no exceptions.</td></tr>
-    <tr><td class="k">Contrast</td><td>99 tests pass, checking every text pairing against WCAG AA in light and dark.</td></tr>
+    <tr><td class="k">Rendering</td><td>All 12 pages render in both themes, with no exceptions raised anywhere — including inside Qt callbacks, which do not reach the caller and so used to pass unnoticed.</td></tr>
+    <tr><td class="k">Tests</td><td>161 pass, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and WCAG AA contrast checks in both themes.</td></tr>
     <tr><td class="k">A real turn</td><td>Ollama → <code>llama3.1</code> → streamed, exit 0, 31 s.</td></tr>
   </table>
   <div class="note"><p><strong>Not verified:</strong> Windows and Linux. Both are implemented behind a single platform module, but neither has been run on those systems.</p></div>

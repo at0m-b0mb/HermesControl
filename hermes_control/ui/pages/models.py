@@ -16,9 +16,11 @@ fix exists.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QLineEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (QHBoxLayout, QLineEdit, QProgressBar,
+                               QVBoxLayout, QWidget)
 
 from ... import providers
+from ...ollama import KNOWN_TOO_SMALL, SUGGESTED, Ollama, PullProgress
 from .. import widgets as w
 from ..shell import Page
 
@@ -30,6 +32,10 @@ class ModelsPage(Page):
     def __init__(self, app, parent: QWidget | None = None):
         super().__init__(app, parent)
         self._servers: list[providers.LocalServer] = []
+        self._ollama = Ollama()
+        self._pull_job = None
+        self._pulling = ""
+        self._pull_layers: set[str] = set()
 
         body = QWidget()
         layout = QVBoxLayout(body)
@@ -64,6 +70,38 @@ class ModelsPage(Page):
         layout.addWidget(self._local_card)
 
         # --- hosted --------------------------------------------------------
+        # --- library --------------------------------------------------------
+        self._library = w.Card("Get a model")
+        self._library.add(w.label(
+            "Ollama publishes no search API, so this is a short list chosen "
+            "for one reason: every entry clears the "
+            f"{providers.MIN_CONTEXT_WINDOW:,}-token window Hermes requires. "
+            "The figures are the publishers' own; the real window is measured "
+            "from the model itself once it lands.", "Faint", wrap=True))
+        self._library_box = QVBoxLayout()
+        self._library_box.setSpacing(4)
+        self._library.add_layout(self._library_box)
+
+        self._pull_name = QLineEdit()
+        self._pull_name.setPlaceholderText(
+            "Or pull any name the registry accepts, such as llama3.3:70b "
+            "or hf.co/user/repo:Q4_K_M")
+        self._pull_button = w.button("Download", "", self._pull_typed)
+        self._library.add(w.row(self._pull_name, self._pull_button,
+                                stretch_last=False))
+
+        self._pull_bar = QProgressBar()
+        self._pull_bar.setVisible(False)
+        self._library.add(self._pull_bar)
+        self._pull_status = w.label("", "Faint", wrap=True)
+        self._library.add(self._pull_status)
+        self._library.add(w.label(
+            "Popular models that are too small for Hermes: "
+            + ", ".join(f"{n} ({c:,})" for n, c in KNOWN_TOO_SMALL),
+            "Faint", wrap=True))
+        layout.addWidget(self._library)
+
+        # --- hosted ---------------------------------------------------------
         self._cloud_card = w.Card("Hosted")
         self._cloud_card.add(w.label(
             "A hosted provider needs its credential in .env. Setting one here "
@@ -192,6 +230,40 @@ class ModelsPage(Page):
             widgets += [w.spacer(), use]
             self._cloud_box.addWidget(w.row(*widgets))
 
+        # --- library --------------------------------------------------------
+        self._clear(self._library_box)
+        have = {m.name for s in self._servers for m in s.models}
+        for suggestion in SUGGESTED:
+            name = w.label(suggestion.name, "Mono")
+            name.setFixedWidth(170)
+            window = w.label(f"{suggestion.published_context:,}", "MonoFaint")
+            window.setFixedWidth(72)
+            size = w.label(suggestion.size_hint, "MonoFaint")
+            size.setFixedWidth(62)
+            note = w.label(suggestion.note, "Faint", wrap=True)
+            owned = any(h == suggestion.name or h.startswith(suggestion.name + "-")
+                        or h.split(":")[0] == suggestion.name.split(":")[0]
+                        and h == suggestion.name for h in have)
+            action = (w.Badge("INSTALLED", "live") if owned
+                      else w.button("Download", "",
+                                    lambda n=suggestion.name: self._pull(n)))
+            if isinstance(action, w.Badge):
+                action.apply_mode(mode)
+            else:
+                action.setEnabled(not self._pulling)
+            # The note takes the slack; the action keeps a button's width.
+            # Without this the button stretches across half the card.
+            action.setFixedWidth(118)
+            holder = QWidget()
+            line = QHBoxLayout(holder)
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(8)
+            for widget in (name, window, size):
+                line.addWidget(widget)
+            line.addWidget(note, 1)
+            line.addWidget(action)
+            self._library_box.addWidget(holder)
+
         reachable = sum(1 for s in self._servers if s.reachable)
         local_models = sum(len(s.models) for s in self._servers)
         usable = sum(1 for s in self._servers for m in s.models
@@ -215,13 +287,20 @@ class ModelsPage(Page):
                         "live" if in_use or verdict.ok else
                         ("attention" if verdict.fix else "fault"))
         badge.apply_mode(mode)
+        remove = w.button("Remove", "Quiet",
+                          lambda n=model.name: self._delete(n))
+        remove.setEnabled(server.provider_key == "ollama" and not in_use
+                          and not self._pulling)
+        remove.setToolTip("Delete this model from disk"
+                          if remove.isEnabled() else
+                          "A model in use cannot be removed")
         use = w.button("Use", "Primary" if not in_use else "",
                        lambda s=server, m=model: self._use_local(s, m))
         use.setEnabled(not in_use and model.context >= providers.MIN_CONTEXT_WINDOW
                        or (not in_use and not model.context))
         if not use.isEnabled() and not in_use:
             use.setToolTip(verdict.detail or verdict.headline)
-        return w.row(name, window, size, badge, w.spacer(), use)
+        return w.row(name, window, size, badge, w.spacer(), remove, use)
 
     def _fail(self, error: str) -> None:
         self._message.setText(f"Could not read the model setup: {error}")
@@ -250,6 +329,89 @@ class ModelsPage(Page):
             runtime = self.app.page("Runtime")
             if runtime is not None:
                 runtime.refresh()
+
+        self.jobs.run(work, done, self._fail)
+
+    # --- downloading ------------------------------------------------------
+
+    def _pull_typed(self) -> None:
+        name = self._pull_name.text().strip()
+        if name:
+            self._pull(name)
+
+    def _pull(self, name: str) -> None:
+        """Download a model, reporting progress per layer.
+
+        Ollama reports bytes per *layer*, not for the download as a whole, so a
+        single percentage computed from them jumps backwards every time a layer
+        finishes. The bar tracks the layer in flight and the caption counts the
+        layers, which is both honest and more informative.
+        """
+        if self._pulling:
+            return
+        self._pulling = name
+        self._pull_layers = set()
+        self._pull_bar.setVisible(True)
+        self._pull_bar.setRange(0, 0)
+        self._pull_status.setText(f"Starting download of {name}…")
+        self._pull_button.setEnabled(False)
+        self._pull_job = self.jobs.stream(
+            lambda: self._ollama.pull(name), self._on_pull,
+            self._on_pull_done, self._fail)
+
+    def _on_pull(self, progress: PullProgress) -> None:
+        if progress.error:
+            self._pull_status.setText(f"Download failed: {progress.error}")
+            return
+        if progress.digest:
+            self._pull_layers.add(progress.digest)
+        if progress.total > 0:
+            self._pull_bar.setRange(0, 100)
+            self._pull_bar.setValue(int(progress.fraction * 100))
+            mb = progress.completed / 1_000_000
+            total_mb = progress.total / 1_000_000
+            self._pull_status.setText(
+                f"{self._pulling} — {progress.status} — "
+                f"{mb:,.0f} of {total_mb:,.0f} MB "
+                f"(layer {len(self._pull_layers)})")
+        else:
+            self._pull_bar.setRange(0, 0)
+            self._pull_status.setText(f"{self._pulling} — {progress.status}")
+
+    def _on_pull_done(self) -> None:
+        name, self._pulling = self._pulling, ""
+        self._pull_bar.setVisible(False)
+        self._pull_button.setEnabled(True)
+        self._pull_job = None
+        self._pull_name.clear()
+        # The published figure got it here; the measured one decides whether
+        # it is usable, so read it back before saying anything.
+        window = self._ollama.context_window(name)
+        if not window:
+            self._pull_status.setText(
+                f"{name}: finished, but its context window could not be read. "
+                f"Rescan to check it.")
+        elif window < providers.MIN_CONTEXT_WINDOW:
+            self._pull_status.setText(
+                f"{name} downloaded, but its real window is {window:,} tokens — "
+                f"under the {providers.MIN_CONTEXT_WINDOW:,} Hermes requires, "
+                f"so it cannot be used. You may want to remove it.")
+        else:
+            self._pull_status.setText(
+                f"{name} is ready — {window:,} tokens. Press Use to select it.")
+        self.refresh()
+
+    def _delete(self, name: str) -> None:
+        self._pull_status.setText(f"Removing {name}…")
+
+        def work():
+            return self._ollama.delete(name)
+
+        def done(result):
+            ok, message = result
+            self._pull_status.setText(
+                f"Removed {name}." if ok else f"Could not remove {name}: {message}")
+            self.refresh()
 
         self.jobs.run(work, done, self._fail)
 

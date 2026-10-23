@@ -102,28 +102,56 @@ def install_dir_for(hermes_home: Path) -> Path:
 def executable_candidates(install_dir: Path) -> list[Path]:
     """Every place the real entry point might sit, best first.
 
-    The installer builds a venv inside the checkout at ``.hermes`` and puts the
-    console script in the usual place for the platform. A source checkout may
-    also expose ``hermes_cli``; we prefer a real script because it has the
-    venv's interpreter baked into its shebang.
+    ``<install>/.hermes/bin`` is where the installer publishes the checkout's
+    launcher, and that path is the same on every platform — ``.hermes`` is a
+    launcher directory, not a virtualenv, so there is no ``Scripts`` variant of
+    it. Upstream looks for ``hermes.exe`` then ``hermes.cmd`` there on Windows
+    (``pm/environments.py``), so both are tried.
+
+    A desktop channel build publishes under a qualified name such as
+    ``hermes-canary`` so it cannot shadow another install, which is why the
+    directory is also globbed as a last resort rather than assuming the name.
     """
-    venv = install_dir / ".hermes"
-    bins = [venv / ("Scripts" if IS_WINDOWS else "bin")]
-    # Some layouts nest the venv differently; look in the obvious siblings too.
-    bins += [install_dir / ".venv" / ("Scripts" if IS_WINDOWS else "bin")]
-    out: list[Path] = []
-    for b in bins:
-        out.append(b / _exe("hermes"))
-    return out
+    launchers = install_dir / ".hermes" / "bin"
+    names = ["hermes.exe", "hermes.cmd"] if IS_WINDOWS else ["hermes"]
+    out: list[Path] = [launchers / name for name in names]
+    # Fall back to a real venv layout, where Windows genuinely uses Scripts.
+    for venv in (install_dir / ".hermes", install_dir / ".venv"):
+        bin_dir = venv / ("Scripts" if IS_WINDOWS else "bin")
+        out.append(bin_dir / _exe("hermes"))
+    # On POSIX the launcher dir and the venv bin dir are both "bin", so the
+    # list collapses; keep it ordered but unique.
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for candidate in out:
+        if candidate not in seen:
+            seen.add(candidate)
+            unique.append(candidate)
+    return unique
+
+
+def find_executable(install_dir: Path) -> Path | None:
+    """The launcher that is actually present, including a renamed channel build."""
+    for candidate in executable_candidates(install_dir):
+        if candidate.exists():
+            return candidate
+    launchers = install_dir / ".hermes" / "bin"
+    if launchers.is_dir():
+        pattern = "hermes*.exe" if IS_WINDOWS else "hermes*"
+        for found in sorted(launchers.glob(pattern)):
+            # hermes-acp is a different entry point, not the CLI.
+            if found.is_file() and "acp" not in found.name:
+                return found
+    return None
 
 
 def locate(hermes_home: Path | None = None) -> Install:
     """Find the managed Hermes install (whether or not it is there yet)."""
     hh = Path(hermes_home) if hermes_home else isolated_hermes_home()
     idir = install_dir_for(hh)
-    for cand in executable_candidates(idir):
-        if cand.exists():
-            return Install(hh, idir, cand)
+    found = find_executable(idir)
+    if found is not None:
+        return Install(hh, idir, found)
     # Not installed yet: report the path it *will* have, so callers can show it.
     return Install(hh, idir, executable_candidates(idir)[0])
 
@@ -156,12 +184,18 @@ def install_command(hermes_home: Path, install_dir: Path,
     wizard on ``/dev/tty``, which a GUI has no way to answer.
     """
     if IS_WINDOWS:
+        # The flags differ from the shell installer's and are not guessable:
+        # install.ps1 declares -HermesHome / -InstallDir / -NonInteractive /
+        # -IncludeDesktop. An earlier version of this passed `--dir`, which
+        # PowerShell does not bind to -InstallDir at all. Everything after
+        # -File is handed to the script, so -NonInteractive reaches the script
+        # rather than being eaten by the PowerShell host.
         args = [
             powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass",
             "-File", str(script),
             "-NonInteractive",
             "-HermesHome", str(hermes_home),
-            "--dir", str(install_dir),
+            "-InstallDir", str(install_dir),
         ]
         if include_desktop:
             args.append("-IncludeDesktop")

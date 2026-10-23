@@ -468,8 +468,13 @@ class Hermes:
         if db is None:
             return []
         try:
-            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=4)
-        except sqlite3.Error:
+            # Path.as_uri() is doing real work here, not tidiness: a Windows
+            # path interpolated into a URI gives "file:C:\\Users\\..." , whose
+            # backslashes are URI escapes and whose drive colon is not legal in
+            # a URI path. as_uri() produces file:///C:/Users/... and
+            # percent-encodes the rest.
+            conn = sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True, timeout=4)
+        except (sqlite3.Error, ValueError):
             return []
         try:
             conn.row_factory = sqlite3.Row

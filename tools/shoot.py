@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +36,19 @@ def settle(app: QApplication, seconds: float) -> None:
         time.sleep(0.02)
 
 
+#: Exceptions raised inside a Qt slot never reach the caller — Qt hands them
+#: to sys.excepthook and keeps going, leaving a half-drawn page that renders
+#: and saves perfectly well. Collecting them is the difference between "it
+#: rendered" and "it worked".
+QT_ERRORS: list[str] = []
+
+
+def _collect(kind, value, tb) -> None:
+    QT_ERRORS.append("".join(traceback.format_exception(kind, value, tb)))
+
+
 def main() -> int:
+    sys.excepthook = _collect
     OUT.mkdir(parents=True, exist_ok=True)
     app, shell = build([sys.argv[0]])
     shell.resize(1280, 860)
@@ -66,12 +79,18 @@ def main() -> int:
                 print(f"  {mode:<5} {name:<10} FAILED {exc}")
 
     print(f"\n{len(written)} screenshots written to {OUT}")
+    if QT_ERRORS:
+        print(f"\n{len(QT_ERRORS)} exception(s) escaped a Qt callback:")
+        for error in QT_ERRORS[:5]:
+            print("  " + error.strip().splitlines()[-1])
+        failures.append(f"{len(QT_ERRORS)} exception(s) inside Qt callbacks")
     if failures:
         print("\nFAILURES:")
         for failure in failures:
             print("  -", failure)
         return 1
-    print("every page rendered in both themes with no exceptions")
+    print("every page rendered in both themes, with no exceptions "
+          "raised anywhere including inside Qt callbacks")
     return 0
 
 
