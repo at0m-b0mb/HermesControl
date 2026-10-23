@@ -329,16 +329,26 @@ QPushButton#Primary:disabled {{ background: {c('rule')}; border-color: {c('rule'
                                 color: {c('ink_faint')}; }}
 QPushButton#Danger {{ color: {c('fault')}; border-color: {c('fault')}; }}
 QPushButton#Danger:hover {{ background: {c('fault_wash')}; }}
+/* An ID selector outranks :disabled on a bare type selector, so without
+   these a #Danger or #Quiet button keeps its enabled colours while being
+   unclickable -- it looks pressable and does nothing. */
+QPushButton#Danger:disabled {{
+    color: {c('ink_faint')}; border-color: {c('rule')};
+    background: {c('surface_alt')};
+}}
 QPushButton#Quiet {{
     background: transparent; border: 1px solid transparent;
     color: {c('ink_muted')}; padding: 3px {s['snug']}px;
 }}
 QPushButton#Quiet:hover {{ color: {c('ink')}; border-color: {c('rule')}; }}
+QPushButton#Quiet:disabled {{ color: {c('ink_faint')}; background: transparent;
+                              border-color: transparent; }}
 QPushButton#Link {{
     background: transparent; border: none; color: {c('brass')};
     padding: 2px 0px; text-align: left; {font_css('small')}
 }}
 QPushButton#Link:hover {{ color: {c('shine')}; }}
+QPushButton#Link:disabled {{ color: {c('ink_faint')}; background: transparent; }}
 
 /* --- inputs -------------------------------------------------------------- */
 QLineEdit, QPlainTextEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {{

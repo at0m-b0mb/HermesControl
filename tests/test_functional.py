@@ -265,3 +265,127 @@ def test_theme_switch_reaches_painted_widgets(app) -> None:
         assert shell.mode == mode
         assert page.ribbon._mode == mode, (
             "the context ribbon paints itself and did not get the new mode")
+
+# --- the state a new user actually sees -------------------------------------
+
+@pytest.fixture()
+def fresh(app, tmp_path):
+    """Point the whole app at an empty HERMES_HOME, then put it back.
+
+    The new-user state had never once been looked at: every check so far ran
+    against a working install, which is the one configuration guaranteed not
+    to expose a first-run bug.
+    """
+    from hermes_control import platforms
+    from hermes_control.cli import Hermes
+    application, shell = app
+    original = shell.hermes
+    empty = Hermes(platforms.locate(tmp_path / "empty"))
+    shell.hermes = empty
+    for page in shell._pages.values():
+        page.hermes = empty
+    yield application, shell, empty
+    shell.hermes = original
+    for page in shell._pages.values():
+        page.hermes = original
+    shell.show_page("Runtime")
+    settle(application, 2.0)
+
+
+def test_nothing_installed_renders_every_page(fresh) -> None:
+    from hermes_control.__main__ import PAGES
+    application, shell, empty = fresh
+    assert not empty.installed
+    for page_class in PAGES:
+        shell.show_page(page_class.title)
+        settle(application, 1.2)
+
+
+def test_console_refuses_to_send_with_nothing_installed(fresh) -> None:
+    """Offering Send here produces a stack trace instead of an answer."""
+    application, shell, _empty = fresh
+    page = shell.page("Console")
+    shell.show_page("Console")
+    settle(application, 3.0, until=lambda: not page._send.isEnabled())
+    assert not page._send.isEnabled(), "Send must be off with no Hermes"
+    assert not page._input.isEnabled()
+    assert "not installed" in page._state.text().lower()
+
+    # Even called directly it must do nothing.
+    page._input.setPlainText("hello")
+    page.send()
+    assert page._stream is None, "send() started a turn it could not finish"
+
+
+def test_console_does_not_claim_hosted_when_nothing_is_set(fresh) -> None:
+    application, shell, _empty = fresh
+    page = shell.page("Console")
+    shell.show_page("Console")
+    settle(application, 3.0)
+    label = page._model_label.text().lower()
+    assert "hosted" not in label, (
+        f"an unconfigured provider was described as hosted: {label!r}")
+
+
+def test_setup_installs_where_the_app_is_looking(fresh) -> None:
+    application, shell, empty = fresh
+    page = shell.page("Setup")
+    shell.show_page("Setup")
+    settle(application, 3.0)
+    assert page._installer.hermes_home == empty.home, (
+        "Setup would install somewhere the rest of the app does not read")
+
+# --- session continuity -----------------------------------------------------
+
+@needs_hermes
+@pytest.mark.skipif(os.environ.get("HC_SKIP_SLOW") == "1", reason="HC_SKIP_SLOW=1")
+def test_a_second_turn_continues_the_same_conversation() -> None:
+    """--resume has to be passed a real id, and the id is not where it looks.
+
+    The `system` event declares a `session_id` and leaves it empty; the real
+    one arrives on the closing `result` event. Reading only the former meant
+    every turn silently began a new conversation, which no amount of looking
+    at the transcript would reveal.
+
+    Asserted mechanically rather than by asking the model what it remembers:
+    the session must be reused, no new session may appear, and the input
+    token count must grow because the earlier turn is now part of the prompt.
+    """
+    def session_ids() -> set:
+        return {s.get("session_id") or s.get("id")
+                for s in HERMES.sessions(limit=500)}
+
+    before = session_ids()
+    first = HERMES.chat("Say OK.", max_turns=2)
+    first_result = next(e for e in first.events() if e.type == "result")
+    session = first_result.raw.get("session_id")
+    assert session, "the result event must carry the session id"
+    after_first = session_ids()
+    assert len(after_first - before) == 1, "the first turn should open a session"
+
+    second = HERMES.chat("Say OK again.", resume=session, max_turns=2)
+    second_result = next(e for e in second.events() if e.type == "result")
+    assert second_result.raw.get("session_id") == session, (
+        "the resumed turn landed in a different session")
+    assert session_ids() == after_first, "resuming must not open a new session"
+    assert (second_result.tokens.get("input", 0)
+            > first_result.tokens.get("input", 0)), (
+        "input did not grow, so the earlier turn was not in the prompt")
+
+
+@needs_hermes
+def test_the_console_reads_the_session_id_from_the_result_event(app) -> None:
+    """A unit-ish check so the slow test above is not the only guard."""
+    from hermes_control.cli import Event
+    application, shell = app
+    page = shell.page("Console")
+    shell.show_page("Console")
+    settle(application, 2.0)
+    page._session = ""
+    page._on_event(Event("system", {"session_id": "", "model": "x"}))
+    assert page._session == "", "the system event's id is empty by design"
+    page._on_event(Event("result", {"session_id": "local-abc123",
+                                    "tokens": {}, "exit_code": 0}))
+    assert page._session == "local-abc123", (
+        "the result event's session id was ignored, so --resume would never "
+        "be passed")

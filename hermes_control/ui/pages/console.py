@@ -17,6 +17,7 @@ what you ask next, so it is shown rather than hidden.
 from __future__ import annotations
 
 import html
+import re
 
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -42,6 +43,7 @@ class ConsolePage(Page):
         self._session = ""
         self._window = 0
         self._tool_depth = 0
+        self._ready = False
 
         layout = QVBoxLayout(self)
         pad = 32
@@ -111,6 +113,7 @@ class ConsolePage(Page):
             if isinstance(value, int) and value > window:
                 window = value
         return {
+            "installed": hermes.installed,
             "model": model_config.get("default") or model_config.get("model") or "",
             "provider": model_config.get("provider") or "",
             "window": window,
@@ -127,9 +130,37 @@ class ConsolePage(Page):
         self._window = data["window"]
         self._threshold = float(data["threshold"] or 0.5)
         self._target = float(data["target"] or 0.2)
-        where = ("local" if providers.is_local(str(data["provider"])) else "hosted")
-        self._model_label.setText(
-            f"{data['model'] or 'no model set'}  ·  {where}")
+        model = str(data["model"] or "")
+        provider = str(data["provider"] or "")
+        if not data["installed"]:
+            self._model_label.setText("Hermes Agent is not installed")
+        elif not model:
+            self._model_label.setText("no model set")
+        else:
+            # "hosted" was being claimed for an unset provider, because
+            # is_local("") is False. Only say where it runs once we know.
+            where = "local" if providers.is_local(provider) else "hosted"
+            self._model_label.setText(f"{model}  ·  {where}")
+
+        # Offering Send when a turn cannot possibly start produces a stack
+        # trace instead of an answer. Say why, and point at the fix.
+        self._ready = bool(data["installed"] and model)
+        self._send.setEnabled(self._ready and self._stream is None)
+        self._input.setEnabled(self._ready)
+        if not data["installed"]:
+            self._state.setText(
+                "Hermes Agent is not installed yet — open Setup to install it.")
+            self._input.setPlaceholderText("")
+        elif not model:
+            self._state.setText(
+                "No model is selected — choose one on the Models page.")
+            self._input.setPlaceholderText("")
+        else:
+            self._input.setPlaceholderText(
+                "Ask Hermes something.  Ctrl+Enter sends.")
+            if not self._transcript.toPlainText():
+                self._state.setText("")
+
         self.ribbon.set_budget(0, self._window, self._threshold, self._target)
         self.ribbon.apply_mode(self.app.mode)
 
@@ -163,7 +194,7 @@ class ConsolePage(Page):
 
     def send(self) -> None:
         prompt = self._input.toPlainText().strip()
-        if not prompt or self._stream is not None:
+        if not prompt or self._stream is not None or not self._ready:
             return
         self._input.clear()
         self._append(prompt, "ink", mono=False, label="you")
@@ -187,6 +218,19 @@ class ConsolePage(Page):
     def stop(self) -> None:
         if self._stream is not None:
             self._stream.cancel()
+            # Keep whatever arrived before the stop and say plainly that it is
+            # incomplete. Discarding it left two of the user's own messages
+            # adjacent in the transcript with nothing to show a turn had ever
+            # been started, which reads as a lost message rather than a
+            # cancelled one.
+            partial = self._pending
+            self._pending = ""
+            if partial.strip():
+                self._append(partial, "ink", mono=False, label="hermes")
+            self._append("You stopped this turn; the reply above is "
+                         "incomplete." if partial.strip() else
+                         "You stopped this turn before it answered.",
+                         "attention", mono=False, label="stopped")
             self._state.setText("Stopped.")
         if self._job is not None:
             self._job.request_stop()
@@ -196,6 +240,10 @@ class ConsolePage(Page):
     def _on_event(self, event: Event) -> None:
         kind = event.type
         if kind == "system":
+            # The system event declares a session_id field and leaves it
+            # empty; the real id only arrives on the closing result event (and
+            # on stderr). Reading it here alone meant --resume was never
+            # passed and every turn silently started a new conversation.
             self._session = event.raw.get("session_id") or self._session
             if self._session:
                 self._session_label.setText(f"session {self._session[:12]}")
@@ -227,6 +275,9 @@ class ConsolePage(Page):
 
         if kind == "result":
             self._flush()
+            self._session = event.raw.get("session_id") or self._session
+            if self._session:
+                self._session_label.setText(f"session {self._session[:12]}")
             tokens = event.tokens or {}
             total = int(tokens.get("total") or 0)
             if total:
@@ -253,6 +304,14 @@ class ConsolePage(Page):
     def _on_finished(self) -> None:
         self._flush()
         stream = self._stream
+        if stream is not None and not self._session:
+            # A turn that fails before its result event still printed the id
+            # on stderr; keeping it means the next message continues the same
+            # conversation rather than quietly abandoning it.
+            match = re.search(r"Session:\s*(\S+)", stream.stderr)
+            if match:
+                self._session = match.group(1)
+                self._session_label.setText(f"session {self._session[:12]}")
         if stream is not None and stream.returncode not in (0, None) \
                 and not stream.cancelled:
             detail = stream.stderr.strip().splitlines()
@@ -262,7 +321,7 @@ class ConsolePage(Page):
                 self._append(hint, "fault", label="hermes failed")
         self._stream = None
         self._job = None
-        self._send.setEnabled(True)
+        self._send.setEnabled(self._ready)
         self._stop.setEnabled(False)
 
     def _on_failed(self, error: str) -> None:

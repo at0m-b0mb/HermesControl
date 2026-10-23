@@ -159,3 +159,27 @@ def test_stylesheet_builds_for_every_mode() -> None:
         qss = theme.stylesheet(mode)
         assert "{{" not in qss and "}}" not in qss, "unescaped brace in QSS"
         assert len(qss) > 4000
+
+#: Every button variant that overrides colour with an ID selector. Qt ranks an
+#: ID above a pseudo-state on a bare type selector, so `QPushButton:disabled`
+#: does not reach them — without their own rule they keep enabled colours
+#: while being unclickable, which reads as "broken" rather than "not yet".
+ID_BUTTONS = ("Primary", "Danger", "Quiet", "Link")
+
+
+@pytest.mark.parametrize("name", ID_BUTTONS)
+@pytest.mark.parametrize("mode", MODES)
+def test_every_id_button_styles_its_disabled_state(name: str, mode: str) -> None:
+    qss = theme.stylesheet(mode)
+    assert f"QPushButton#{name} " in qss or f"QPushButton#{name}{{" in qss
+    assert f"QPushButton#{name}:disabled" in qss, (
+        f"a disabled #{name} button would keep its enabled colours")
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_disabled_text_is_distinguishable_from_enabled(mode: str) -> None:
+    """Disabled ink must differ from body ink, or the state is invisible."""
+    assert theme.color("ink_faint", mode) != theme.color("ink", mode)
+    ratio = theme.contrast(theme.color("ink_faint", mode),
+                           theme.color("surface_alt", mode))
+    assert ratio >= AA_LARGE, f"disabled text is unreadable at {ratio:.2f}:1"

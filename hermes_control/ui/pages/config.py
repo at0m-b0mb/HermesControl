@@ -83,8 +83,15 @@ class OptionRow(QWidget):
         head.addWidget(self._state)
         layout.addLayout(head)
 
+        self._secret = False
         self._editor = self._build_editor(option)
-        layout.addWidget(self._editor)
+        if self._secret:
+            reveal = w.button("Reveal", "Quiet", self._toggle_reveal)
+            reveal.setCheckable(True)
+            self._reveal = reveal
+            layout.addWidget(w.row(self._editor, reveal, stretch_last=False))
+        else:
+            layout.addWidget(self._editor)
 
         if option.help:
             text = option.help if len(option.help) < 600 else option.help[:600] + "…"
@@ -149,8 +156,12 @@ class OptionRow(QWidget):
 
         line = QLineEdit()
         line.setText("" if current is None else str(current))
-        line.setPlaceholderText(
-            "not set" if option.value is None else "")
+        line.setPlaceholderText("not set" if option.value is None else "")
+        if confschema.is_secret(option.path):
+            # Hermes masks credentials in `config get`; reading the file
+            # directly must not be the way they end up on a screenshot.
+            line.setEchoMode(QLineEdit.EchoMode.Password)
+            self._secret = True
         line.textChanged.connect(self._touched)
         return line
 
@@ -220,6 +231,14 @@ class OptionRow(QWidget):
 
     def mark_error(self, message: str) -> None:
         self._state.setText(message[:90])
+
+    def _toggle_reveal(self) -> None:
+        if not isinstance(self._editor, QLineEdit):
+            return
+        hidden = self._editor.echoMode() == QLineEdit.EchoMode.Password
+        self._editor.setEchoMode(QLineEdit.EchoMode.Normal if hidden
+                                 else QLineEdit.EchoMode.Password)
+        self._reveal.setText("Hide" if hidden else "Reveal")
 
     def apply_mode(self, mode: str) -> None:
         self._mode = mode

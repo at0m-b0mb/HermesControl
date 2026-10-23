@@ -361,3 +361,24 @@ def parse(config_path: Path) -> Schema:
         ordered.append("General")
     return Schema(options=options, sections=ordered, source=config_path,
                   config_version=config_version)
+
+#: Keys whose value is a credential. Hermes's own ``config get`` masks these
+#: unless ``--raw`` is passed; the editor reads the file directly, so it has to
+#: make the same judgement itself.
+#:
+#: The plural ``_tokens`` exclusion is the whole subtlety: in Hermes a "token"
+#: is usually a unit of context, so ``compression.threshold_tokens`` and
+#: ``proactive_prune_tokens`` are counts, not secrets. Masking them would hide
+#: ordinary numbers behind dots and teach people to ignore the mask.
+_SECRET = re.compile(
+    r"(api_?key|password|passwd|secret|credential|private_key|access_key"
+    r"|(?:^|[._])token$|bot_token|client_id)", re.IGNORECASE)
+
+
+def is_secret(path: str) -> bool:
+    """Should this key's value be hidden by default?"""
+    leaf = path.rsplit(".", 1)[-1]
+    if leaf.endswith("_tokens") or leaf == "tokens":
+        return False          # a count of context tokens, not a credential
+    return bool(_SECRET.search(path))
+

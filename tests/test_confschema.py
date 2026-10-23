@@ -130,3 +130,29 @@ def test_parsing_the_installed_config_if_there_is_one() -> None:
     assert len(parsed.options) > 100, "a real config should yield many options"
     assert len(parsed.sections) > 10
     assert all("." in o.path or o.path.islower() for o in parsed.options)
+
+
+# --- credentials ------------------------------------------------------------
+
+@pytest.mark.parametrize("path", [
+    "model.api_key", "terminal.sudo_password", "secrets",
+    "providers.my-proxy.api_key", "gateway.telegram.bot_token",
+    "model.client_id", "something.access_key", "a.private_key",
+])
+def test_credential_keys_are_recognised(path: str) -> None:
+    assert confschema.is_secret(path), f"{path} would be shown in plain text"
+
+
+@pytest.mark.parametrize("path", [
+    "compression.threshold_tokens",
+    "compression.proactive_prune_tokens",
+    "compression.proactive_prune_min_reclaim_tokens",
+    "agent.max_turns", "model.ollama_num_ctx", "memory.memory_char_limit",
+])
+def test_token_counts_are_not_treated_as_secrets(path: str) -> None:
+    """In Hermes a "token" is usually a unit of context, not a credential.
+
+    Masking these would hide ordinary numbers behind dots, which teaches
+    people that the mask means nothing.
+    """
+    assert not confschema.is_secret(path), f"{path} is a count, not a secret"

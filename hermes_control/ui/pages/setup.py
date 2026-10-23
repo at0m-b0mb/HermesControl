@@ -14,6 +14,8 @@ see which stage failed when one does.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtWidgets import QPlainTextEdit, QProgressBar, QVBoxLayout, QWidget
 
 from ... import platforms, providers
@@ -62,7 +64,8 @@ class SetupPage(Page):
 
     def __init__(self, app, parent: QWidget | None = None):
         super().__init__(app, parent)
-        self._installer = Installer()
+        self._installer_for: Path | None = None
+        self.__installer: Installer | None = None
         self._ollama = Ollama()
         self._install_job = None
 
@@ -102,6 +105,21 @@ class SetupPage(Page):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(w.scroller(body))
+
+    @property
+    def _installer(self) -> Installer:
+        """An installer aimed at the home the app is currently driving.
+
+        Binding this once at construction went stale the moment the managed
+        home changed — including after this page's own install, which
+        re-locates the executable. Rebuilding it when the home moves keeps
+        Setup from installing somewhere nothing else reads.
+        """
+        home = self.hermes.home
+        if self.__installer is None or self._installer_for != home:
+            self.__installer = Installer(hermes_home=home)
+            self._installer_for = home
+        return self.__installer
 
     # --- state --------------------------------------------------------------
 

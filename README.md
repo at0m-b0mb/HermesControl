@@ -116,10 +116,12 @@ On macOS 26 (Darwin 27), Python 3.13, PySide6 6.12 / Qt 6.12, against Hermes Age
 
 - Isolated install into `~/.hermes-agent`, leaving an unrelated `~/.hermes` byte-identical by SHA-256.
 - All 11 pages render in both themes with no exceptions (`tools/shoot.py`).
-- **108 tests pass**, including a functional suite that drives the real widgets against the real install.
+- **190 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
 - A chat turn end to end *through the interface*: typed into the Console, streamed back, answer in the transcript, token accounting delivered to the ribbon.
 - Editing a setting and pressing Apply is asserted to reach `config.yaml`, and the original is restored.
 - Every local model's verdict is checked against what Ollama actually reports, and a model under the floor is asserted to be unselectable.
+- **Conversation continuity is asserted mechanically**: a resumed turn reuses the same session, opens no new one, and shows a larger input-token count because the earlier turn is now in the prompt.
+- **Exceptions inside Qt callbacks fail the test.** They do not reach the caller — Qt hands them to `sys.excepthook` and carries on with a half-drawn page — so without this a broken page renders and passes.
 
 ```bash
 ./.venv/bin/python -m pytest tests/ -q      # all of it, ~35s plus one real turn
