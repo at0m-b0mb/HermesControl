@@ -60,10 +60,10 @@ PROBE_KEY = _probe_key() if HERMES.installed else PROBE_CANDIDATES[0]
 
 
 @pytest.fixture(scope="module")
-def app():
+def app(isolated_settings):
     from PySide6.QtWidgets import QApplication
     from hermes_control.__main__ import build
-    application, shell = build([sys.argv[0]])
+    application, shell = build([sys.argv[0]], settings=isolated_settings)
     yield application, shell
     shell.jobs.wait_all(2000)
     QApplication.instance().processEvents()
@@ -462,3 +462,52 @@ def test_the_console_remembers_its_choices(app) -> None:
     finally:
         page._toolsets.setCurrentText(original)
         settle(application, 0.3)
+
+
+def test_the_suite_does_not_touch_real_preferences(app, isolated_settings) -> None:
+    """A guard for the guard.
+
+    The Console test below changes the remembered toolset. Without isolation
+    that write lands in the user's own preferences and silently replaces a
+    choice they made — which is exactly what happened before the
+    isolated_settings fixture existed.
+    """
+    application, shell = app
+    assert shell.settings is isolated_settings, "the window built its own settings"
+    assert "Library/Preferences" not in shell.settings.fileName(), (
+        f"settings are not isolated: {shell.settings.fileName()}")
+
+
+@needs_hermes
+def test_the_empty_console_explains_itself_then_gets_out_of_the_way(app) -> None:
+    """On first open the transcript is most of the window.
+
+    A QTextEdit placeholder renders only its first line, so the hint is real
+    content — which means it has to be cleared before the first message, or
+    it sits above the conversation forever.
+    """
+    application, shell = app
+    page = shell.page("Console")
+    shell.show_page("Console")
+    settle(application, 6.0, until=lambda: page._empty)
+    assert page._empty, "no empty state was shown"
+    assert "NOTHING YET" in page._transcript.toPlainText().upper()
+
+    page._append("hello", label="you")
+    assert not page._empty, "the hint was not cleared"
+    assert "NOTHING YET" not in page._transcript.toPlainText().upper()
+    assert "hello" in page._transcript.toPlainText()
+
+    page.reset()
+    assert page._empty, "a new conversation should show the hint again"
+
+
+def test_the_ribbon_says_something_useful_before_the_first_turn() -> None:
+    """"0 of 131K · 0%" is three numbers saying nothing."""
+    from hermes_control.ui.widgets import ContextRibbon
+    ribbon = ContextRibbon()
+    ribbon.set_budget(0, 131_072)
+    assert ribbon.fraction == 0.0
+    assert ribbon._window == 131_072
+    ribbon.set_budget(65_536, 131_072)
+    assert ribbon.fraction == 0.5

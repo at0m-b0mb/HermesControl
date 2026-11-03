@@ -38,7 +38,8 @@ PAGES = (
 )
 
 
-def build(argv: list[str] | None = None) -> tuple[QApplication, Shell]:
+def build(argv: list[str] | None = None,
+          settings=None) -> tuple[QApplication, Shell]:
     """Create the application and its window without showing anything.
 
     Split out from :func:`main` so a smoke test can build the whole interface,
@@ -51,7 +52,7 @@ def build(argv: list[str] | None = None) -> tuple[QApplication, Shell]:
     app.setOrganizationName("at0m-b0mb")
     app.setFont(QFont(theme.sans(), 13))
 
-    shell = Shell(Hermes())
+    shell = Shell(Hermes(), settings=settings)
     # Runtime first: its group heading has to be drawn before any page in it.
     for page_class in PAGES:
         shell.add_page(page_class(shell))

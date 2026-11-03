@@ -381,9 +381,22 @@ class ContextRibbon(QWidget):
         painter.setPen(QPen(c("rule"), 1))
         painter.drawPath(trough)
 
-        # Figures.
+        # Figures. Before the first turn "0 of 131K · 0%" is three numbers
+        # saying nothing; name the window instead, which is the one fact
+        # worth knowing at that point.
         painter.setFont(theme.font("mono_small"))
         painter.setPen(QPen(c("ink")))
+        if not self._used:
+            painter.setPen(QPen(c("ink_faint")))
+            painter.drawText(pad, top + bar_h + 18,
+                             f"{self._fmt(self._window)} window · nothing used yet")
+            metrics = painter.fontMetrics()
+            compact_at = (f"compacts at {self._threshold * 100:.0f}%"
+                          f"  to {self._target * 100:.0f}%")
+            painter.drawText(self.width() - pad - metrics.horizontalAdvance(compact_at),
+                             top + bar_h + 18, compact_at)
+            painter.end()
+            return
         used_text = f"{self._fmt(self._used)} of {self._fmt(self._window)}"
         painter.drawText(pad, top + bar_h + 18, used_text)
 

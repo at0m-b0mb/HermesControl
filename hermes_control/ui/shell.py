@@ -63,11 +63,16 @@ class Shell(QMainWindow):
 
     mode_changed = Signal(str)
 
-    def __init__(self, hermes: Hermes | None = None):
+    def __init__(self, hermes: Hermes | None = None,
+                 settings: QSettings | None = None):
         super().__init__()
         self.hermes = hermes or Hermes()
         self.jobs = JobRunner(self)
-        self.settings = QSettings("at0m-b0mb", "HermesControl")
+        # Injected rather than constructed, so a test can hand in a throwaway
+        # file. Redirecting QSettings globally does not work once Qt has
+        # resolved a settings object, and the suite was writing the user's own
+        # remembered toolset as a side effect of exercising the Console.
+        self.settings = settings or QSettings("at0m-b0mb", "HermesControl")
         self._choice = str(self.settings.value("appearance", theme.AUTO))
         self._mode = theme.resolve(self._choice)
         self._pages: dict[str, Page] = {}

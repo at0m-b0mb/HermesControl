@@ -23,6 +23,24 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
+@pytest.fixture(scope="session", autouse=True)
+def isolated_settings(tmp_path_factory):
+    """Keep the suite out of the real preferences.
+
+    A test that drives the Console changes the remembered toolset, and
+    QSettings happily wrote that to the user's own preferences — so running
+    the tests silently replaced a setting the user had chosen. Found when a
+    screenshot showed "Everything" selected after the suite had run.
+
+    Redirecting QSettings globally does not work -- setDefaultFormat is
+    ignored once Qt has resolved a settings object -- so the window takes its
+    settings as an argument and the suite hands it a throwaway file.
+    """
+    from PySide6.QtCore import QSettings
+    scratch = tmp_path_factory.mktemp("settings")
+    return QSettings(str(scratch / "test.ini"), QSettings.Format.IniFormat)
+
+
 class _Collector:
     def __init__(self) -> None:
         self.errors: list[str] = []

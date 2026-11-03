@@ -48,6 +48,7 @@ class ConsolePage(Page):
         saved = str(app.settings.value("console/workdir", ""))
         self._workdir = (Path(saved) if saved and Path(saved).is_dir()
                          else Path.home())
+        self._empty = False
 
         layout = QVBoxLayout(self)
         pad = 32
@@ -186,6 +187,8 @@ class ConsolePage(Page):
                 self._state.setText("")
 
         self._show_workdir()
+        if not self._transcript.toPlainText().strip():
+            self._show_empty_state()
         self.ribbon.set_budget(0, self._window, self._threshold, self._target)
         self.ribbon.apply_mode(self.app.mode)
 
@@ -219,6 +222,7 @@ class ConsolePage(Page):
 
     def _append(self, body: str, token: str = "ink", *,
                 mono: bool = True, label: str = "") -> None:
+        self._clear_empty_state()
         mode = self.app.mode
         colour = theme.color(token, mode)
         faint = theme.color("ink_faint", mode)
@@ -233,9 +237,42 @@ class ConsolePage(Page):
         bar = self._transcript.verticalScrollBar()
         bar.setValue(bar.maximum())
 
+    def _show_empty_state(self) -> None:
+        """Say what this panel is for while it is still empty.
+
+        A QTextEdit placeholder renders only its first line, so the hint is
+        written as real content and cleared on the first message. On first
+        open this panel is most of the window, and an explanation is worth
+        more than a blank rectangle — particularly the part about what a
+        local model will and will not manage.
+        """
+        mode = self.app.mode
+        faint = theme.color("ink_faint", mode)
+        brass = theme.color("brass", mode)
+        self._transcript.setHtml(
+            f'<div style="color:{faint};font-family:{theme.sans()};'
+            f'font-size:13px;line-height:150%">'
+            f'<p style="color:{brass};font-size:10px;letter-spacing:1.4px">'
+            f'NOTHING YET</p>'
+            f'<p>Ask something and the reply streams in as it is generated. '
+            f'The meter above shows how full the context window is, and where '
+            f'Hermes starts compacting the conversation rather than '
+            f'truncating it.</p>'
+            f'<p>Tools run with your permissions, in the directory shown '
+            f'below. A local model handles conversation well; multi-step work '
+            f'— editing files, running commands — generally needs a hosted '
+            f'provider.</p></div>')
+        self._empty = True
+
+    def _clear_empty_state(self) -> None:
+        if getattr(self, "_empty", False):
+            self._transcript.clear()
+            self._empty = False
+
     def reset(self) -> None:
         self.stop()
         self._transcript.clear()
+        self._show_empty_state()
         self._session = ""
         self._session_label.setText("")
         self.ribbon.set_budget(0, self._window, self._threshold, self._target)
