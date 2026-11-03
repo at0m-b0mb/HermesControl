@@ -113,9 +113,23 @@ class ConnectorsPage(Page):
 
         if portal.logged_in:
             self._portal_dot.set_state("ok", "signed in")
+            # Signing in and having a subscription are different things, and
+            # the Tool Gateway needs the second one. Saying so here stops it
+            # looking like the sign-in half worked.
+            gateway = []
+            if portal.web_tools:
+                gateway.append(f"web search {portal.web_tools}")
+            if portal.image_tools:
+                gateway.append(f"image generation {portal.image_tools}")
+            extra = ""
+            if gateway and any("not configured" in g for g in gateway):
+                extra = ("  The Tool Gateway — web search, image generation — "
+                         "is listed as not configured; that needs a Nous "
+                         "subscription, separate from the account you just "
+                         "signed in with.")
             self._portal_detail.setText(
-                "Connectors can be connected. Each one opens a browser sign-in "
-                "against that app.")
+                "Connectors can be connected. Each one opens a browser "
+                "sign-in against that app." + extra)
         else:
             self._portal_dot.set_state("warn", "not signed in")
             self._portal_detail.setText(
