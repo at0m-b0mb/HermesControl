@@ -172,3 +172,42 @@ def test_the_device_code_is_pulled_out_of_the_output(blob, url, code) -> None:
 
 def test_nothing_is_invented_when_there_is_no_code() -> None:
     assert Connectors.extract_code("Waiting for sign-in...") == ("", "")
+
+
+# --- the setting whose absence fails silently -------------------------------
+
+def test_gmail_ships_its_authserv_id() -> None:
+    """Without it Hermes drops every incoming message.
+
+    `_MISSING_AUTHSERV_REASON` in the email adapter: "authserv-id is not
+    configured; refusing to trust Authentication-Results". The mailbox
+    connects, the test passes, and nobody ever gets a reply — with the reason
+    only in a log. Gmail's is documented, so it is pre-filled.
+    """
+    gmail = mail.provider_for("Gmail")
+    assert gmail is not None
+    assert gmail.authserv_id == "mx.google.com"
+
+
+def test_unknown_providers_do_not_guess_an_authserv_id() -> None:
+    """A wrong pin fails exactly as silently as a missing one."""
+    for provider in mail.PROVIDERS:
+        if provider.label in ("Gmail", "Custom"):
+            continue
+        assert provider.authserv_id == "", (
+            f"{provider.label} guesses an authserv-id; a wrong one drops "
+            f"every message just as a missing one does")
+
+
+def test_the_authserv_variable_is_offered() -> None:
+    assert "EMAIL_AUTHSERV_ID" in mail.OPTIONAL
+    assert "Authentication-Results" in mail.AUTHSERV_HELP
+    assert "drops every incoming message" in mail.AUTHSERV_HELP
+
+
+def test_the_form_refuses_to_save_without_it() -> None:
+    """Checked in the source, since it is a guard rather than a return value."""
+    source = (Path(__file__).resolve().parents[1] / "hermes_control" / "ui"
+              / "pages" / "gateway.py").read_text(encoding="utf-8")
+    assert 'if not values["EMAIL_AUTHSERV_ID"]' in source, (
+        "saving without it produces a mailbox that answers nobody")

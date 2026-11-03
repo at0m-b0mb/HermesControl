@@ -93,11 +93,16 @@ class GatewayPage(Page):
             self._labelled("PASSWORD", self._password, 260),
             self._labelled("ALLOWED SENDERS", self._allowed_field(), 330),
             w.spacer()))
+        self._authserv = QLineEdit()
+        self._authserv.setPlaceholderText("mx.google.com")
         self._email.add(w.row(
             self._labelled("IMAP HOST", self._imap_host, 230),
             self._labelled("PORT", self._imap_port, 90),
             self._labelled("SMTP HOST", self._smtp_host, 230),
             self._labelled("PORT", self._smtp_port, 90), w.spacer()))
+        self._email.add(w.row(
+            self._labelled("RECEIVING SERVER ID", self._authserv, 260),
+            w.label(mail.AUTHSERV_HELP, "Faint", wrap=True), stretch_last=True))
 
         # currentTextChanged does not fire for the selection a combo box is
         # born with, so the first provider's hosts and its app-password
@@ -155,6 +160,7 @@ class GatewayPage(Page):
         if provider is None or provider.label == "Custom":
             self._email_note.setText("")
             return
+        self._authserv.setText(provider.authserv_id)
         self._imap_host.setText(provider.imap_host)
         self._imap_port.setValue(provider.imap_port)
         self._smtp_host.setText(provider.smtp_host)
@@ -178,6 +184,7 @@ class GatewayPage(Page):
             "EMAIL_SMTP_HOST": self._smtp_host.text().strip(),
             "EMAIL_SMTP_PORT": self._smtp_port.value(),
             "EMAIL_ALLOWED_USERS": self._allowed.text().strip(),
+            "EMAIL_AUTHSERV_ID": self._authserv.text().strip(),
         }
 
     def _save_email(self) -> None:
@@ -185,6 +192,14 @@ class GatewayPage(Page):
         if not values["EMAIL_ADDRESS"] or not values["EMAIL_SMTP_HOST"]:
             self._email_status.setText(
                 "An address and an SMTP host are the minimum.")
+            return
+        if not values["EMAIL_AUTHSERV_ID"]:
+            # Saving without it produces a mailbox that connects perfectly and
+            # answers nobody, with the reason only in a log.
+            self._email_status.setText(
+                "Receiving server ID is empty. Hermes will refuse to trust "
+                "the Authentication-Results header and drop every incoming "
+                "message. " + mail.AUTHSERV_HELP)
             return
         self._email_status.setText("Saving to .env…")
 
@@ -273,6 +288,7 @@ class GatewayPage(Page):
             self._imap_host.setText(env.get("EMAIL_IMAP_HOST", ""))
             self._smtp_host.setText(env.get("EMAIL_SMTP_HOST", ""))
             self._allowed.setText(env.get("EMAIL_ALLOWED_USERS", ""))
+            self._authserv.setText(env.get("EMAIL_AUTHSERV_ID", ""))
             for key, box in (("EMAIL_IMAP_PORT", self._imap_port),
                              ("EMAIL_SMTP_PORT", self._smtp_port)):
                 try:

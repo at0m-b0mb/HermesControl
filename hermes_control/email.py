@@ -41,6 +41,13 @@ class Provider:
     smtp_host: str
     smtp_port: int
     note: str = ""
+    #: The receiving mail server's ``authserv-id`` — the first token of the
+    #: ``Authentication-Results`` header it stamps. Hermes refuses to trust
+    #: that header unless it is pinned, so **without this every message is
+    #: dropped**, logged as "authserv-id is not configured". Only filled in
+    #: where it is documented; elsewhere it has to be read off a real message,
+    #: because guessing it wrong fails exactly as silently.
+    authserv_id: str = ""
 
     @property
     def needs_app_password(self) -> bool:
@@ -50,7 +57,8 @@ class Provider:
 PROVIDERS: tuple[Provider, ...] = (
     Provider("Gmail", "imap.gmail.com", 993, "smtp.gmail.com", 587,
              "Google refuses ordinary passwords. Turn on 2-Step Verification, "
-             "then create an App Password and use that here."),
+             "then create an App Password and use that here.",
+             authserv_id="mx.google.com"),
     Provider("Outlook / Microsoft 365", "outlook.office365.com", 993,
              "smtp.office365.com", 587,
              "Microsoft requires an app password once 2FA is on, and many "
@@ -68,7 +76,16 @@ PROVIDERS: tuple[Provider, ...] = (
 #: The variables the plugin reads. Only the first three are required.
 REQUIRED = ("EMAIL_ADDRESS", "EMAIL_PASSWORD", "EMAIL_SMTP_HOST")
 OPTIONAL = ("EMAIL_SMTP_PORT", "EMAIL_IMAP_HOST", "EMAIL_IMAP_PORT",
-            "EMAIL_ALLOWED_USERS", "EMAIL_HOME_ADDRESS")
+            "EMAIL_ALLOWED_USERS", "EMAIL_HOME_ADDRESS", "EMAIL_AUTHSERV_ID")
+
+#: How to find an authserv-id that is not pre-filled. Said in the UI, because
+#: the failure it prevents is total and silent.
+AUTHSERV_HELP = (
+    "Open any message already in that mailbox and look at its raw headers. "
+    "The first token of the topmost Authentication-Results line is the "
+    "authserv-id — for Gmail it is mx.google.com. Without it Hermes refuses "
+    "to trust that header and drops every incoming message."
+)
 SECRET = ("EMAIL_PASSWORD",)
 
 
