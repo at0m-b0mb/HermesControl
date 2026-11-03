@@ -63,6 +63,22 @@ class ConnectorsPage(Page):
         self._filter.textChanged.connect(lambda _: self._render())
         layout.addWidget(self._filter)
 
+        # Looked for here first and not found, so say where it is rather
+        # than leaving the absence to be interpreted as a bug.
+        missing = w.Card("Not here", flat=True)
+        missing.add(w.label(
+            "No email connector exists in this catalogue, and none exists in "
+            "the MCP catalogue either. Email is a Hermes gateway platform "
+            "rather than a connector: it polls an IMAP mailbox and replies "
+            "over SMTP, and it is set up on the Gateway page. Messaging — "
+            "Telegram, Discord, Slack, WhatsApp, Signal — is there too. For "
+            "tools beyond both catalogues, see MCP.", "Faint", wrap=True))
+        missing.add(w.row(
+            w.button("Open Gateway", "", lambda: self.app.show_page("Gateway")),
+            w.button("Open MCP", "Quiet", lambda: self.app.show_page("MCP")),
+            w.spacer()))
+        layout.addWidget(missing)
+
         self._list_card = w.Card("Apps")
         self._list_box = QVBoxLayout()
         self._list_box.setSpacing(3)

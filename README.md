@@ -38,6 +38,7 @@ Hermes already ships a terminal UI, a web dashboard and an Electron app, so a fo
 | **Cron** | Scheduled jobs, and whether the gateway is up to run them. |
 | **Gateway** | The process serving every messaging channel, and a full email setup form with a staged connection test. |
 | **Connectors** | The ~54 apps Hermes can act on, and the one Nous Portal sign-in they all depend on. |
+| **MCP** | The Nous-approved MCP catalogue, plus adding any server beyond it by URL or command. |
 | **Config** | All ~240 options, searchable, with upstream's help text. |
 | **Doctor** | Hermes's own checks, and its logs. |
 | **Colophon** | What this is built from, and the decisions worth stating. |
@@ -77,6 +78,22 @@ hf.co/user/repo:Q4_K_M
 The published context window gets a model onto your disk; the **measured** one decides whether it can be used. After every download the app re-reads the real window from the model itself and tells you if it fell short — because a wrong published figure is precisely the trap this is here to prevent.
 
 > Ollama publishes no search or library API (`/api/library` and `/api/search` both 404), so this is a curated list plus a name field, not a browsable catalogue. Pretending otherwise would mean screen-scraping something that would rot.
+
+---
+
+## Four extension surfaces, and why email is on none of the obvious ones
+
+This trips everyone up, so the MCP page leads with it. People look for email under Connectors, don't find it, and reasonably conclude something is broken.
+
+| What you want | Where it actually lives |
+|---|---|
+| **Email** | Hermes's own **IMAP/SMTP gateway platform** — the Gateway page. **Not a connector, and not in the MCP catalogue either.** |
+| Messaging | Gateway platforms: Telegram, Discord, Slack, WhatsApp, Signal |
+| App accounts | Portal connectors — ~54, all gated behind one Nous Portal sign-in |
+| New tools | **MCP servers** — a Nous-approved catalogue, plus `add` for anything beyond it |
+| Procedures | Skills, including ones the agent writes for itself |
+
+Verified rather than assumed: **neither catalogue contains a Gmail or email entry** — only `close`, a sales CRM. Hermes's own `connectors connect --help` says *"for example gmail"*, and gmail is absent from the list; the help text is wrong, not the catalogue.
 
 ---
 
@@ -153,7 +170,7 @@ On macOS 26 (Darwin 27), Python 3.13, PySide6 6.12 / Qt 6.12, against Hermes Age
 
 - Isolated install into `~/.hermes-agent`, leaving an unrelated `~/.hermes` byte-identical by SHA-256.
 - All 11 pages render in both themes with no exceptions (`tools/shoot.py`).
-- **234 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
+- **239 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
 - A chat turn end to end *through the interface*: typed into the Console, streamed back, answer in the transcript, token accounting delivered to the ribbon.
 - Editing a setting and pressing Apply is asserted to reach `config.yaml`, and the original is restored.
 - Every local model's verdict is checked against what Ollama actually reports, and a model under the floor is asserted to be unselectable.

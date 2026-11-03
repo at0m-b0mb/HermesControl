@@ -20,6 +20,7 @@ from .ui.pages.connectors import ConnectorsPage
 from .ui.pages.console import ConsolePage
 from .ui.pages.doctor import DoctorPage
 from .ui.pages.gateway import GatewayPage
+from .ui.pages.mcp import McpPage
 from .ui.pages.memory import MemoryPage
 from .ui.pages.models import ModelsPage
 from .ui.pages.runtime import RuntimePage
@@ -33,7 +34,7 @@ from .ui.shell import Shell
 PAGES = (
     SetupPage, RuntimePage, ConsolePage, ModelsPage,   # Runtime
     SoulPage, SkillsPage, MemoryPage,           # Agent
-    SchedulePage, GatewayPage, ConnectorsPage,  # Automation
+    SchedulePage, GatewayPage, ConnectorsPage, McpPage,  # Automation
     ConfigPage, DoctorPage, ColophonPage,       # Installation
 )
 
