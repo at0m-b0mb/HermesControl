@@ -15,7 +15,7 @@ from ... import platforms, theme
 from .. import widgets as w
 from ..shell import Page
 
-VERSION = "1.8.0"
+VERSION = "1.8.1"
 
 
 class ColophonPage(Page):
