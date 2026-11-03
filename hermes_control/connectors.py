@@ -19,8 +19,10 @@ app opens it and reports what happened afterwards.
 from __future__ import annotations
 
 import re
+import subprocess
 from dataclasses import dataclass
 
+from . import platforms
 from .cli import Hermes, Result
 
 
@@ -113,5 +115,66 @@ class Connectors:
     def disconnect(self, app: str) -> Result:
         return self.hermes.run(["connectors", "disconnect", app], timeout=120)
 
+    def sign_in_stream(self):
+        """Run the sign-in, yielding each line as it is printed.
+
+        This has to stream. ``auth upgrade`` is a device-code flow: it prints
+        a URL and a short code, then blocks waiting for the person to use
+        them. Capturing the output and returning it at the end — which is
+        what a plain run does — means the code only appears once the flow has
+        already finished or timed out, so a window driving it would show
+        nothing at all while the user waited for something to look at.
+        """
+        argv = [str(self.hermes.install.executable), "auth", "upgrade"]
+        proc = subprocess.Popen(
+            argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL, text=True, bufsize=1,
+            env=self.hermes.env(),
+            creationflags=0x08000000 if platforms.IS_WINDOWS else 0,
+        )
+        self._proc = proc
+        if proc.stdout is not None:
+            for line in proc.stdout:
+                yield line.rstrip()
+        proc.wait()
+        self._proc = None
+
+    def cancel_sign_in(self) -> None:
+        proc = getattr(self, "_proc", None)
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+
+    @staticmethod
+    def extract_code(text: str) -> tuple[str, str]:
+        """Pull the URL and the short code out of the flow's own output."""
+        url = re.search(r"(https://\S*portal\.nousresearch\.com\S*)", text)
+        code = re.search(r"enter code:\s*([A-Z0-9-]{4,})", text, re.IGNORECASE)
+        if code is None:
+            code = re.search(r"\bcode=([A-Z0-9-]{4,})", text)
+        return (url.group(1) if url else "", code.group(1) if code else "")
+
+    def sign_in(self, timeout: float = 600.0) -> Result:
+        """Start the Nous Portal OAuth flow, which opens a browser.
+
+        Not ``hermes portal``. That command is interactive onboarding, and
+        without a terminal it degrades to an informational banner, prints the
+        real instruction in prose, and **exits 0** — so a button wired to it
+        reports success and does nothing, which is exactly what happened.
+
+        ``hermes auth upgrade`` is the non-interactive entry point and opens
+        the browser itself unless told not to. The long timeout is deliberate:
+        it waits on a person completing a sign-in, possibly with a second
+        factor.
+        """
+        return self.hermes.run(["auth", "upgrade"], timeout=timeout)
+
+    def open_signup(self) -> Result:
+        """Open the Portal subscription page, for someone with no account."""
+        return self.hermes.run(["portal", "open"], timeout=60)
+
+    def signed_in(self) -> bool:
+        """Ask again, rather than trusting a command's exit code."""
+        return self.portal().logged_in
+
     def portal_login_hint(self) -> str:
-        return "hermes portal"
+        return "hermes auth upgrade"

@@ -140,3 +140,35 @@ def test_the_password_never_appears_in_a_failure_message() -> None:
                         "smtp.nowhere.invalid", 587)
     blob = " ".join(f"{s.name} {s.detail}" for s in result.stages)
     assert secret not in blob
+
+
+# --- the sign-in command ----------------------------------------------------
+
+def test_sign_in_does_not_use_the_brochure_command() -> None:
+    """`hermes portal` without a terminal prints a banner and exits 0.
+
+    A button wired to it reported success and did nothing, which is how this
+    was found. The real entry point is `auth upgrade`.
+    """
+    source = (Path(__file__).resolve().parents[1]
+              / "hermes_control" / "connectors.py").read_text(encoding="utf-8")
+    assert '"auth", "upgrade"' in source
+    assert '["portal"]' not in source, "that command cannot start a sign-in"
+
+
+@pytest.mark.parametrize("blob,url,code", [
+    ("1. Open: https://portal.nousresearch.com/claim?code=F5PQ-MCPK\n"
+     "2. If prompted, enter code: F5PQ-MCPK",
+     "https://portal.nousresearch.com/claim?code=F5PQ-MCPK", "F5PQ-MCPK"),
+    ("Open: https://portal.nousresearch.com/claim?code=AB12-CD34",
+     "https://portal.nousresearch.com/claim?code=AB12-CD34", "AB12-CD34"),
+])
+def test_the_device_code_is_pulled_out_of_the_output(blob, url, code) -> None:
+    """The browser does not always open, so both have to reach the screen."""
+    got_url, got_code = Connectors.extract_code(blob)
+    assert got_url == url
+    assert got_code == code
+
+
+def test_nothing_is_invented_when_there_is_no_code() -> None:
+    assert Connectors.extract_code("Waiting for sign-in...") == ("", "")

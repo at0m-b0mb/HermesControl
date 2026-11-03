@@ -28,6 +28,7 @@ class ConnectorsPage(Page):
         super().__init__(app, parent)
         self._connectors = Connectors(self.hermes)
         self._busy = ""
+        self._sign_in_output = ""
 
         body = QWidget()
         layout = QVBoxLayout(body)
@@ -49,6 +50,11 @@ class ConnectorsPage(Page):
         self._portal_card.add(self._portal_detail)
         self._portal_actions = w.row()
         self._portal_card.add(self._portal_actions)
+        # The flow prints a URL and a short code and then waits. Both have to
+        # be on screen and copyable, because the browser does not always open.
+        self._portal_code = w.label("", "Mono", wrap=True, select=True)
+        self._portal_code.setVisible(False)
+        self._portal_card.add(self._portal_code)
         layout.addWidget(self._portal_card)
 
         self._filter = QLineEdit()
@@ -122,6 +128,8 @@ class ConnectorsPage(Page):
                 "credentials.")
             self._portal_actions.layout().addWidget(
                 w.button("Sign in to Nous Portal", "Primary", self._portal_login))
+            self._portal_actions.layout().addWidget(
+                w.button("No account yet", "", self._open_signup))
         self._portal_actions.layout().addWidget(
             w.button("Copy shell command", "Quiet", self._copy_hint))
         self._portal_actions.layout().addStretch(1)
@@ -195,12 +203,76 @@ class ConnectorsPage(Page):
 
     def _portal_login(self) -> None:
         self._busy = "portal"
+        self._sign_in_output = ""
+        self._portal_code.setVisible(True)
+        self._portal_code.setText("Starting sign-in…")
         self._message.setText(
-            "Opening Nous Portal sign-in in your browser. Finish it there, "
-            "then press Re-check.")
-        self.jobs.run(
-            lambda: self.hermes.run(["portal"], timeout=600),
-            lambda r: self._after(r, "Portal sign-in"), self._failed)
+            "A browser should open. If it does not, use the link and code "
+            "shown here. Finish it in the browser — this app never handles "
+            "those credentials.")
+        self._clear(self._portal_actions.layout())
+        self._portal_actions.layout().addWidget(
+            w.button("Cancel", "Danger", self._cancel_sign_in))
+        self._portal_actions.layout().addStretch(1)
+        self.jobs.stream(self._connectors.sign_in_stream, self._on_sign_in_line,
+                         self._on_sign_in_done, self._failed)
+
+    def _on_sign_in_line(self, line: str) -> None:
+        self._sign_in_output += line + "\n"
+        url, code = self._connectors.extract_code(self._sign_in_output)
+        if url or code:
+            parts = []
+            if url:
+                parts.append(f"Open:  {url}")
+            if code:
+                parts.append(f"Code:  {code}")
+            self._portal_code.setText("\n".join(parts))
+        elif line.strip():
+            self._portal_code.setText(line.strip()[:200])
+
+    def _on_sign_in_done(self) -> None:
+        self._busy = ""
+        if self._connectors.signed_in():
+            self._portal_code.setVisible(False)
+            self._message.setText(
+                "Signed in to Nous Portal. Connectors are available now.")
+        else:
+            self._message.setText(
+                "Sign-in did not complete. If you have no Portal account yet, "
+                "press 'No account yet' to open the sign-up page.")
+        self.refresh()
+
+    def _cancel_sign_in(self) -> None:
+        self._connectors.cancel_sign_in()
+        self._busy = ""
+        self._portal_code.setVisible(False)
+        self._message.setText("Sign-in cancelled.")
+        self.refresh()
+
+    def _after_sign_in(self, result) -> None:
+        """Judge on the state, not the exit code.
+
+        The command this used to run exited 0 without doing anything, and the
+        page cheerfully reported success. Asking whether the account is
+        actually signed in now is the only answer worth printing.
+        """
+        self._busy = ""
+        if self._connectors.signed_in():
+            self._message.setText("Signed in to Nous Portal. Connectors are "
+                                  "available now.")
+        else:
+            detail = result.message if not result.ok else (
+                "the sign-in did not complete — if you have no Portal account "
+                "yet, press 'No account yet' to open the sign-up page")
+            self._message.setText(f"Still not signed in: {detail}")
+        self.refresh()
+
+    def _open_signup(self) -> None:
+        self._message.setText("Opening the Nous Portal sign-up page…")
+        self.jobs.run(self._connectors.open_signup,
+                      lambda r: self._message.setText(
+                          "Sign-up page opened in your browser."
+                          if r.ok else r.message), self._failed)
 
     def _connect(self, app_name: str) -> None:
         self._busy = app_name
