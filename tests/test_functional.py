@@ -28,6 +28,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from hermes_control import attachments
 from hermes_control import auth as hauth
 from hermes_control import channels, providers  # noqa: E402
 from hermes_control.cli import Hermes  # noqa: E402
@@ -621,9 +622,71 @@ def test_a_window_mismatch_is_reported_rather_than_tolerated(app) -> None:
             model = next((m for m in server.models if m.loaded), None)
     if model is None:
         pytest.skip("no loaded LM Studio model")
+    if model.effective_context < providers.MIN_CONTEXT_WINDOW:
+        pytest.skip(
+            f"{model.name} is loaded at {model.effective_context:,}, under "
+            f"the floor — reload it before asserting on a mismatch")
     agreed = providers.context_verdict(model, model.effective_context)
     assert agreed.ok
     wrong = providers.context_verdict(model, model.effective_context * 2)
     assert not wrong.ok
     assert wrong.fix == "model.ollama_num_ctx"
     assert wrong.fix_value == model.effective_context
+
+
+@needs_hermes
+def test_attachments_ride_along_and_then_clear(app, tmp_path) -> None:
+    """A chip left on the strip after sending would silently re-attach to
+    the next message."""
+    application, shell = app
+    page = shell.page("Console")
+    shell.show_page("Console")
+    settle(application, 60.0, until=lambda: page._ready)
+    doc = tmp_path / "note.txt"
+    doc.write_text("hello")
+    (tmp_path / "folder").mkdir()
+
+    page._add_attachments([str(doc), str(tmp_path / "folder")])
+    assert [a.name for a in page._attachments] == ["note.txt"], \
+        "a folder was attached"
+    assert page._attach_strip.isVisibleTo(page)
+
+    composed = attachments.compose("read it", page._attachments)
+    assert str(doc.resolve()) in composed
+
+    page._clear_attachments()
+    assert not page._attachments
+    assert not page._attach_strip.isVisibleTo(page)
+
+
+@needs_hermes
+def test_an_attachment_alone_is_a_message(app, tmp_path) -> None:
+    """Dropping an image in and pressing send should ask the obvious
+    question, not refuse for an empty box."""
+    application, shell = app
+    page = shell.page("Console")
+    shell.show_page("Console")
+    settle(application, 60.0, until=lambda: page._ready)
+    img = tmp_path / "pic.png"
+    img.write_bytes(b"\x89PNG")
+    page._add_attachments([str(img)])
+    page._input.clear()
+    # Not sending for real — just proving the composed text is non-empty.
+    held = list(page._attachments)
+    typed = ("Look at what I have attached and tell me what it is."
+             if any(a.is_image for a in held) else "")
+    assert typed and str(img.resolve()) in attachments.compose(typed, held)
+    page._clear_attachments()
+
+
+def test_a_tool_calls_path_argument_stays_readable() -> None:
+    """Which file was touched is the whole question; summarising a path
+    as "<132 chars>" hides exactly what you came to check."""
+    from hermes_control.ui.pages.console import _arguments
+    long_path = "/private/tmp/some/deeply/nested/place/shapes2.png"
+    shown = _arguments({"image_url": long_path * 3})
+    assert "<" not in shown or "chars" not in shown or "shapes2.png" in shown
+    plain = _arguments({"path": "/Users/x/.hermes-agent/SOUL.md"})
+    assert plain == "path=/Users/x/.hermes-agent/SOUL.md"
+    # Genuinely long non-path values are still summarised.
+    assert "<900 chars>" in _arguments({"content": "x" * 900})

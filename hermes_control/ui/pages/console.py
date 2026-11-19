@@ -23,14 +23,31 @@ from pathlib import Path
 
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QPlainTextEdit, QTextEdit, QVBoxLayout,
-    QWidget,
+    QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QPlainTextEdit,
+    QTextEdit, QVBoxLayout, QWidget,
 )
 
-from ... import briefing, providers, theme, toolsets
+from ... import attachments, briefing, providers, theme, toolsets
 from ...cli import ChatStream, Event
 from .. import widgets as w
 from ..shell import Page
+
+
+def _looks_like_path(text: str) -> bool:
+    """A single filesystem path, rather than prose that mentions one."""
+    stripped = text.strip()
+    return (stripped.startswith(("/", "~", "./", "../"))
+            and "\n" not in stripped and " " not in Path(stripped).name)
+
+
+def _short_path(text: str, keep: int = 2) -> str:
+    """``…/scratchpad/shapes2.png`` — enough to recognise, short enough
+    to sit in a transcript line."""
+    path = Path(text.strip())
+    parts = path.parts
+    if len(parts) <= keep + 1:
+        return str(path)
+    return "\u2026/" + "/".join(parts[-keep:])
 
 
 def _arguments(raw: object, limit: int = 160) -> str:
@@ -52,7 +69,11 @@ def _arguments(raw: object, limit: int = 160) -> str:
     for key, value in raw.items():
         text = value if isinstance(value, str) else json.dumps(value)
         if len(text) > 60:
-            text = f"<{len(text)} chars>"
+            # A long *path* is the one long value worth showing, because
+            # which file was touched is the whole question. Summarising it
+            # as "<132 chars>" hides exactly what you came to check.
+            text = (_short_path(text) if _looks_like_path(text)
+                    else f"<{len(text)} chars>")
         bits.append(f"{key}={text}")
     joined = "  ".join(bits)
     return joined if len(joined) <= limit else joined[:limit] + "\u2026"
@@ -68,6 +89,7 @@ class ConsolePage(Page):
         self._job = None
         self._pending = ""
         self._session = ""
+        self._attachments: list[attachments.Attachment] = []
         self._window = 0
         self._tool_depth = 0
         self._ready = False
@@ -136,23 +158,116 @@ class ConsolePage(Page):
         options.addWidget(self._session_label)
         layout.addLayout(options)
 
+        # Attachments live between the options and the input, where they
+        # read as part of the message being composed rather than as a
+        # setting. The strip is hidden until something is on it, so the
+        # common case costs no vertical space.
+        self._attach_strip = QWidget()
+        self._attach_row = QHBoxLayout(self._attach_strip)
+        self._attach_row.setContentsMargins(0, 0, 0, 0)
+        self._attach_row.setSpacing(6)
+        self._attach_strip.setVisible(False)
+        layout.addWidget(self._attach_strip)
+
         self._input = QPlainTextEdit()
         self._input.setObjectName("MonoEdit")
         self._input.setFixedHeight(92)
         self._input.setPlaceholderText(
-            "Ask Hermes something.  Ctrl+Enter sends.")
+            "Ask Hermes something.  Ctrl+Enter sends.  "
+            "Drag a file or image in, or press Attach.")
         layout.addWidget(self._input)
 
+        self._attach = w.button("Attach", "", self._choose_files)
         self._send = w.button("Send", "Primary", self.send)
         self._stop = w.button("Stop", "Danger", self.stop)
         self._stop.setEnabled(False)
         self._clear = w.button("New conversation", "Quiet", self.reset)
         self._state = w.label("", "Faint", wrap=True)
-        layout.addWidget(w.row(self._state, w.spacer(), self._clear,
-                               self._stop, self._send))
+        layout.addWidget(w.row(self._state, w.spacer(), self._attach,
+                               self._clear, self._stop, self._send))
 
+        self.setAcceptDrops(True)
         QShortcut(QKeySequence("Ctrl+Return"), self, activated=self.send)
         QShortcut(QKeySequence("Meta+Return"), self, activated=self.send)
+
+    # --- attachments --------------------------------------------------------
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt name
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802 - Qt name
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:  # noqa: N802 - Qt name
+        """Take files dropped anywhere on the page.
+
+        Dropped onto the page rather than onto the input box: aiming at a
+        92-pixel strip is a worse experience than aiming at the window,
+        and nothing else here wants a drop.
+        """
+        urls = event.mimeData().urls()
+        paths = [u.toLocalFile() for u in urls if u.isLocalFile()]
+        if paths:
+            self._add_attachments(paths)
+            event.acceptProposedAction()
+
+    def _choose_files(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Attach to this message", str(self._workdir))
+        if paths:
+            self._add_attachments(paths)
+
+    def _add_attachments(self, paths) -> None:
+        existing = {a.path for a in self._attachments}
+        added = [a for a in attachments.collect(paths)
+                 if a.path not in existing]
+        skipped = len(paths) - len(added) - len(
+            [p for p in paths if Path(p).resolve() in existing])
+        self._attachments.extend(added)
+        self._show_attachments()
+        if added:
+            self._state.setText(
+                f"{len(self._attachments)} attached. They are named to the "
+                f"agent by absolute path when you send.")
+        elif skipped:
+            # A folder is the usual case, and walking one would quietly
+            # enqueue hundreds of files.
+            self._state.setText(
+                "Nothing attached — folders are skipped, files only.")
+
+    def _show_attachments(self) -> None:
+        while self._attach_row.count():
+            item = self._attach_row.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._attach_strip.setVisible(bool(self._attachments))
+        if not self._attachments:
+            return
+        mode = self.app.mode
+        for item in self._attachments:
+            chip = w.Badge(item.label, "live" if item.is_image else "idle")
+            chip.apply_mode(mode)
+            chip.setToolTip(f"{item.path}\n{item.kind}")
+            drop = w.button("\u00d7", "Quiet",
+                            lambda i=item: self._remove_attachment(i))
+            drop.setFixedWidth(26)
+            drop.setToolTip(f"Remove {item.name}")
+            self._attach_row.addWidget(chip)
+            self._attach_row.addWidget(drop)
+        clear = w.button("Clear", "Quiet", self._clear_attachments)
+        clear.setFixedWidth(56)
+        self._attach_row.addWidget(clear)
+        self._attach_row.addStretch(1)
+
+    def _remove_attachment(self, item) -> None:
+        self._attachments = [a for a in self._attachments if a.path != item.path]
+        self._show_attachments()
+
+    def _clear_attachments(self) -> None:
+        self._attachments = []
+        self._show_attachments()
 
     # --- lifecycle ----------------------------------------------------------
 
@@ -418,11 +533,24 @@ class ConsolePage(Page):
     # --- sending ------------------------------------------------------------
 
     def send(self) -> None:
-        prompt = self._input.toPlainText().strip()
-        if not prompt or self._stream is not None or not self._ready:
+        typed = self._input.toPlainText().strip()
+        held = list(self._attachments)
+        # An attachment on its own is a message: dropping an image in and
+        # pressing send should ask the obvious question rather than
+        # refusing for an empty box.
+        if not typed and held:
+            typed = ("Look at what I have attached and tell me what it is."
+                     if any(a.is_image for a in held)
+                     else "Read what I have attached and summarise it.")
+        if not typed or self._stream is not None or not self._ready:
             return
+        prompt = attachments.compose(typed, held)
         self._input.clear()
-        self._append(prompt, "ink", mono=False, label="you")
+        shown = typed
+        if held:
+            shown += "\n" + "\n".join(f"\u2514 {a.label}" for a in held)
+        self._append(shown, "ink", mono=False, label="you")
+        self._clear_attachments()
         self._pending = ""
         self._tool_depth = 0
 

@@ -21,6 +21,15 @@ class _Agent(FileEditorPage):
     group = "Agent"
     filename = "memories/MEMORY.md"
     intro = "Facts the agent has chosen to keep."
+    empty_hint = (
+        "MEMORY.md does not exist yet.\n\n"
+        "That is normal, and not a loading failure — Hermes creates this "
+        "file the first time the agent decides something is worth keeping "
+        "between sessions. Until then there is genuinely nothing to show.\n\n"
+        "Ask the agent to remember something and it will appear here. You "
+        "can also write facts in yourself and press Save; whatever is here "
+        "is injected into every system prompt, under the character budget "
+        "shown above.")
 
 
 class _User(FileEditorPage):
@@ -28,6 +37,13 @@ class _User(FileEditorPage):
     group = "Agent"
     filename = "memories/USER.md"
     intro = "What the agent believes about you."
+    empty_hint = (
+        "USER.md does not exist yet.\n\n"
+        "Hermes writes this as it learns about you — your name, how you "
+        "like answers, what you are working on. Nothing has been recorded "
+        "yet, which is not a failure to load.\n\n"
+        "Anything written here is repeated into every future conversation, "
+        "so a wrong fact is worth correcting.")
 
 
 class MemoryPage(Page):

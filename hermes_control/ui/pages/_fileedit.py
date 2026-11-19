@@ -20,6 +20,8 @@ class FileEditorPage(Page):
     """Edit one file, with its own explanation and a save that reports."""
 
     filename = ""
+    #: Shown in place of the content when the file is absent.
+    empty_hint = ""
     intro = ""
     placeholder = ""
 
@@ -67,9 +69,20 @@ class FileEditorPage(Page):
         self._editor.setPlainText(text)
         self._editor.blockSignals(False)
         self._save.setEnabled(False)
-        self._message.setText(
-            f"{len(text.splitlines())} lines" if text
-            else "Does not exist yet; saving will create it.")
+        if text:
+            self._message.setText(f"{len(text.splitlines())} lines")
+        else:
+            # A blank editor and a thin line of status underneath look
+            # exactly like a page that failed to load. Put the reason
+            # where the content would be, so pressing Reload again is
+            # obviously not the answer.
+            self._message.setText("Does not exist yet; saving will create it.")
+            self._editor.setPlaceholderText(
+                self.empty_hint or
+                f"{path.name} does not exist yet.\n\n"
+                f"That is normal — it is created the first time something "
+                f"writes to it. Typing here and pressing Save creates it "
+                f"now.")
 
     def _touched(self) -> None:
         dirty = self._editor.toPlainText() != self._loaded

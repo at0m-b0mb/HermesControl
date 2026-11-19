@@ -147,10 +147,23 @@ class GatewayPage(Page):
                      lambda: self._form.setVisible(False)),
             w.spacer()))
         self._form.setVisible(False)
+        self._pending_disconnect = None
         self._editing = None
         self._inputs = {}
         self._env: dict = {}
         layout.addWidget(self._form)
+
+        # Disconnecting is easy to press by accident and tedious to undo,
+        # so it says what it will clear before it clears it.
+        self._confirm = w.Card("Confirm")
+        self._confirm_text = w.label("", "Faint", wrap=True)
+        self._confirm.add(self._confirm_text)
+        self._confirm.add(w.row(
+            w.button("Disconnect", "Danger", self._confirm_disconnect),
+            w.button("Keep it", "Quiet", self._cancel_disconnect),
+            w.spacer()))
+        self._confirm.setVisible(False)
+        layout.addWidget(self._confirm)
 
         # Proof, rather than inference: a message that arrives came through
         # the gateway's own delivery path, with no model and no agent loop
@@ -349,6 +362,13 @@ class GatewayPage(Page):
                 action = w.button(
                     "Set up", "",
                     lambda c=state.channel: self._setup_channel(c))
+            elif state.state in ("live", "blocked", "broken"):
+                # Anything that has credentials deserves a way out of
+                # them. A channel you cannot disconnect from the app is
+                # one you have to go and edit .env to be rid of.
+                action = w.button(
+                    "Disconnect", "Danger",
+                    lambda c=state.channel: self._disconnect(c))
             elif state.channel.secrets and state.state != "live":
                 # The row used to say "paste the token below" with nothing
                 # below to paste it into. A channel whose setup is a few
@@ -388,11 +408,18 @@ class GatewayPage(Page):
         # reach, so it can never offer a channel that would fail anyway.
         self._target.clear()
         for state in survey.live:
-            for target in state.targets or [state.channel.key]:
-                self._target.addItem(
-                    f"{state.channel.name} — {target}"
-                    if target != state.channel.key else state.channel.name,
-                    target if ":" in target else state.channel.key)
+            if state.targets:
+                for target in state.targets:
+                    # The menu shows who it is; the data is what
+                    # `send -t` can actually address.
+                    self._target.addItem(
+                        f"{state.channel.name} — {target.label}",
+                        target.address)
+            else:
+                # No discovered chats yet — the platform's home channel is
+                # still a valid address, and on Telegram no chat exists
+                # until someone has messaged the bot at least once.
+                self._target.addItem(state.channel.name, state.channel.key)
         has_target = self._target.count() > 0
         self._target.setEnabled(has_target)
         self._send_button.setEnabled(has_target)
@@ -421,6 +448,62 @@ class GatewayPage(Page):
             "is never displayed here.")
         self._message.setText(
             f"Platforms active: {status.platforms or 'none configured'}")
+
+    def _disconnect(self, channel) -> None:
+        """Clear a channel's credentials and restart the gateway.
+
+        Blanking the keys rather than deleting them: Hermes owns the
+        shape of ``.env``, and an empty value is what its own setup
+        flows write for "not configured". The allowlist goes too — a
+        stale allowlist left behind would silently authorise whoever is
+        on it the next time the channel is connected.
+        """
+        self._pending_disconnect = channel
+        self._confirm.setVisible(True)
+        self._confirm_text.setText(
+            f"Disconnect {channel.name}? This clears "
+            f"{', '.join(channel.secrets) or 'its pairing'}"
+            + (f" and {channel.allow_key}" if channel.allow_key else "")
+            + " from .env and restarts the gateway. Nothing is deleted "
+              "at the other end — the bot itself still exists, and you "
+              "can reconnect by pasting its token again.")
+
+    def _confirm_disconnect(self) -> None:
+        channel = getattr(self, "_pending_disconnect", None)
+        if channel is None:
+            return
+        self._confirm.setVisible(False)
+        self._pending_disconnect = None
+        keys = list(channel.secrets)
+        if channel.allow_key:
+            keys.append(channel.allow_key)
+        # Extras that would otherwise be left pointing at a chat that is
+        # no longer reachable.
+        keys += [f"{channel.key.upper()}_HOME_CHANNEL",
+                 f"{channel.key.upper()}_HOME_CHANNEL_NAME"]
+        self._message.setText(f"Disconnecting {channel.name}\u2026")
+
+        def work():
+            cleared = [k for k in keys if self._env.get(k)]
+            for key in cleared:
+                self.hermes.config_set(key, "")
+            return cleared, self.hermes.gateway("restart")
+
+        def done(outcome):
+            cleared, restart = outcome
+            self._message.setText(
+                f"{channel.name} disconnected \u2014 cleared "
+                f"{len(cleared)} setting(s)."
+                + ("" if restart.ok else
+                   f" The gateway did not restart: "
+                   f"{(restart.stderr or restart.message).strip()[:120]}"))
+            self.refresh()
+
+        self.jobs.run(work, done, lambda e: self._message.setText(e))
+
+    def _cancel_disconnect(self) -> None:
+        self._pending_disconnect = None
+        self._confirm.setVisible(False)
 
     def _open_form(self, channel) -> None:
         """Show the fields one channel needs, and only those."""

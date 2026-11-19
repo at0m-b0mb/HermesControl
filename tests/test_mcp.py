@@ -119,6 +119,35 @@ def test_a_channel_the_gateway_can_reach_is_live():
     assert survey.live == [telegram]
 
 
+def test_a_target_is_a_record_not_a_string():
+    """Telegram answers with dicts. Reading them as strings put the whole
+    repr in the menu and then handed that repr to `send -t`, which cannot
+    address anything with it."""
+    payload = ('{"platforms": {"telegram": [{"id": "5522781788", '
+               '"name": "King Krish", "type": "dm", "thread_id": null}]}}')
+    found = channels.parse_targets(payload)["telegram"]
+    assert len(found) == 1
+    target = found[0]
+    assert target.ident == "5522781788"
+    assert target.address == "telegram:5522781788"
+    assert target.label == "King Krish (dm)"
+
+
+def test_bare_string_targets_still_work():
+    """Older versions list ids rather than records."""
+    found = channels.parse_targets('{"platforms": {"slack": ["C0123"]}}')["slack"]
+    assert found[0].address == "slack:C0123"
+
+
+def test_a_platform_with_no_discovered_chats_is_still_live():
+    """On Telegram no chat exists until someone has messaged the bot, so
+    an empty list means "nothing discovered yet", not "unreachable"."""
+    env = _env(TELEGRAM_BOT_TOKEN="x", TELEGRAM_ALLOWED_USERS="7")
+    survey = channels.survey(env, '{"platforms": {"telegram": []}}', True)
+    telegram = next(s for s in survey.states if s.channel.key == "telegram")
+    assert telegram.state == "live" and not telegram.targets
+
+
 def test_slack_needs_both_tokens_and_says_which_is_missing():
     survey = channels.survey(_env(SLACK_BOT_TOKEN="xoxb-x"),
                              '{"platforms": {}}', True)

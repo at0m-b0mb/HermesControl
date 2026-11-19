@@ -257,8 +257,18 @@ def lms_reload(model: str, context: int = RELOAD_CONTEXT,
                             timeout=timeout)
     # An unload failure is not fatal: the model may simply not be loaded.
     run([str(LMS_CLI), "unload", model], check=False)
-    done = run([str(LMS_CLI), "load", model,
-                "-c", str(context), "--gpu", "max", "-y"], check=False)
+    # No TTL. LM Studio's default is to unload an idle model after an
+    # hour and then **auto-load it again at its own default context** the
+    # next time something calls it — 8,192 here, far under Hermes's
+    # floor. So a model reloaded correctly breaks itself an hour later,
+    # with nothing said and no action by anyone. Loading it without a TTL
+    # is what makes the fix stay fixed.
+    done = run([str(LMS_CLI), "load", model, "-c", str(context),
+                "--gpu", "max", "--ttl", "0", "-y"], check=False)
+    if done.returncode != 0 and "ttl" in (done.stderr or "").lower():
+        # Older CLIs reject --ttl rather than ignoring it.
+        done = run([str(LMS_CLI), "load", model, "-c", str(context),
+                    "--gpu", "max", "-y"], check=False)
     if done.returncode != 0:
         detail = (done.stderr or done.stdout or "").strip().splitlines()
         return False, (detail[-1] if detail else

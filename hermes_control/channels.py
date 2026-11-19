@@ -99,7 +99,7 @@ class ChannelState:
     missing: tuple[str, ...]
     allowed: str
     deliverable: bool
-    targets: tuple[str, ...] = ()
+    targets: tuple[Target, ...] = ()
     #: "live" once the gateway can reach it, down through the stages.
     state: str = "off"
     headline: str = ""
@@ -121,11 +121,42 @@ class Survey:
         return [s for s in self.states if s.deliverable]
 
 
-def parse_targets(payload: str) -> dict[str, list[str]]:
+@dataclass
+class Target:
+    """One place a platform can deliver to."""
+
+    platform: str
+    ident: str
+    name: str = ""
+    kind: str = ""
+
+    @property
+    def address(self) -> str:
+        """What ``hermes send -t`` wants.
+
+        ``platform:id``, or the bare platform when there is no id, which
+        delivers to that platform's home channel.
+        """
+        return f"{self.platform}:{self.ident}" if self.ident else self.platform
+
+    @property
+    def label(self) -> str:
+        if self.name and self.kind:
+            return f"{self.name} ({self.kind})"
+        return self.name or self.ident or self.platform
+
+
+def parse_targets(payload: str) -> dict[str, list[Target]]:
     """Read ``hermes send --list --json``.
 
-    Shape: ``{"platforms": {"telegram": [...], ...}}``. An empty mapping is
-    a real answer — nothing is connected — and is not an error.
+    Shape: ``{"platforms": {"telegram": [...]}}``. An empty mapping is a
+    real answer — nothing is connected — and is not an error.
+
+    Each entry is a **dict**, not a string: Telegram answers with
+    ``{"id": "5522781788", "name": "King Krish", "type": "dm"}``. Reading
+    those as strings put the whole repr in the menu and then handed that
+    repr to ``send -t``, which cannot address anything. Older versions
+    list bare ids, so both shapes are accepted.
     """
     try:
         data = json.loads(payload)
@@ -138,15 +169,22 @@ def parse_targets(payload: str) -> dict[str, list[str]]:
     platforms = data.get("platforms")
     if not isinstance(platforms, dict):
         return {}
-    out: dict[str, list[str]] = {}
+    out: dict[str, list[Target]] = {}
     for key, value in platforms.items():
-        if isinstance(value, list):
-            out[key] = [str(v) for v in value]
-        elif isinstance(value, dict):
-            # Some versions nest named targets rather than listing them.
-            out[key] = [str(v) for v in value.keys()]
-        else:
-            out[key] = []
+        found: list[Target] = []
+        entries = (value if isinstance(value, list)
+                   else list(value.keys()) if isinstance(value, dict)
+                   else [])
+        for entry in entries:
+            if isinstance(entry, dict):
+                ident = str(entry.get("id") or entry.get("chat_id") or "")
+                found.append(Target(
+                    platform=key, ident=ident,
+                    name=str(entry.get("name") or ""),
+                    kind=str(entry.get("type") or "")))
+            else:
+                found.append(Target(platform=key, ident=str(entry)))
+        out[key] = found
     return out
 
 
@@ -177,9 +215,11 @@ def judge(channel: Channel, env: dict[str, str],
             state.state = "live"
             state.headline = "Connected."
             state.detail = (
-                f"The gateway lists "
-                f"{', '.join(found) if found else 'this platform'} as a "
-                f"delivery target. Send a test message to prove it end to end.")
+                "The gateway lists "
+                + (", ".join(t.label for t in found) if found
+                   else "this platform")
+                + " as a delivery target. Send a test message to prove it "
+                  "end to end.")
         return state
 
     if not listed:

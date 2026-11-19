@@ -30,7 +30,7 @@ Hermes already ships a terminal UI, a web dashboard and an Electron app, so a fo
 |---|---|
 | **Setup** | Four steps from nothing to a working agent: host check, install Hermes, get a model, done. |
 | **Runtime** | Version, channel, commit, interpreter. Isolation, stated explicitly. Gateway start/stop/restart. Host prerequisites. |
-| **Console** | Chat, streamed token by token. Opens with a briefing of every tool the model is actually being handed; each call shows its arguments, timing and result. Live context-budget ribbon. |
+| **Console** | Chat, streamed token by token. Opens with a briefing of every tool the model is actually being handed; each call shows its arguments, timing and result. Attach files and images, or drag them in. Live context-budget ribbon. |
 | **Models** | Local servers probed live — the window a model is *served* at, not the one it advertises, plus tool and vision support as the server reports them; a model library with one-click download; ~22 hosted providers. |
 | **Soul** | `SOUL.md` — the agent's identity, first slot in its system prompt. |
 | **Skills** | Installed procedures and whether each can actually run; a search across every registry Hermes knows; the three routes to your own mailbox. |
@@ -61,6 +61,21 @@ vision ×1    look at images
 ```
 
 It also states the room left for conversation after the system prompt and tool schemas, because on a 65,536-token window those are most of it.
+
+### Attachments, and the flag that cannot be used
+
+Hermes has an `--image` flag. It is unusable here, and the reason is worth stating because it looks like it should work:
+
+```
+Error: Unsupported gateway CLI options: --image.
+  --image: use `hermes --tui` or the Desktop app to attach the image
+```
+
+When a gateway is running — which it must be to serve Telegram, WhatsApp or email — the turn is handed to that process, and the gateway refuses the flag. An attachment feature built on it would work right up until someone connected a channel, then stop.
+
+So attachments travel the way that works in both cases: the file is named by **absolute path** in the prompt, and the agent reaches for it with the tools it already has — `vision_analyze` for an image, `read_file` for anything else. Drag a file onto the Console or press Attach; folders are skipped rather than walked, because dropping a folder on a chat window should not quietly enqueue four hundred files.
+
+Absolute paths, always. The agent's working directory is not yours and not this app's — a bare filename resolves somewhere nobody intended, which is exactly how a `SOUL.md` edit once landed in a home directory instead of the Hermes install.
 
 ### The ribbon
 
@@ -233,7 +248,7 @@ On macOS 26 (Darwin 27), Python 3.13, PySide6 6.12 / Qt 6.12, against Hermes Age
 
 - Isolated install into `~/.hermes-agent`, leaving an unrelated `~/.hermes` byte-identical by SHA-256.
 - All 11 pages render in both themes with no exceptions (`tools/shoot.py`).
-- **323 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
+- **336 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
 - A chat turn end to end *through the interface*: typed into the Console, streamed back, answer in the transcript, token accounting delivered to the ribbon.
 - Editing a setting and pressing Apply is asserted to reach `config.yaml`, and the original is restored.
 - Every local model's verdict is checked against what Ollama actually reports, and a model under the floor is asserted to be unselectable.

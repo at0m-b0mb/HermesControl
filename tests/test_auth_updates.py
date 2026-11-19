@@ -156,3 +156,73 @@ def test_version_comparison_refuses_to_guess():
     # And anything unparseable is unknown, never "an update is available".
     for bad in (("", "1.0"), ("dev", "1.0"), ("1.0", "nightly")):
         assert updates.compare_versions(*bad) is None
+
+
+# --- attachments ------------------------------------------------------------
+
+from pathlib import Path  # noqa: E402
+
+from hermes_control import attachments  # noqa: E402
+
+
+def test_folders_and_missing_files_are_dropped(tmp_path):
+    """Dropping a folder on a chat window must not quietly enqueue
+    everything inside it."""
+    real = tmp_path / "a.txt"
+    real.write_text("x")
+    (tmp_path / "sub").mkdir()
+    found = attachments.collect([real, tmp_path / "sub", tmp_path / "nope.txt"])
+    assert [a.name for a in found] == ["a.txt"]
+
+
+def test_the_same_file_twice_is_attached_once(tmp_path):
+    f = tmp_path / "a.txt"
+    f.write_text("x")
+    assert len(attachments.collect([f, f, str(f)])) == 1
+
+
+def test_images_are_distinguished_from_other_files(tmp_path):
+    img = tmp_path / "pic.PNG"
+    img.write_bytes(b"\x89PNG")
+    doc = tmp_path / "notes.md"
+    doc.write_text("x")
+    found = {a.name: a for a in attachments.collect([img, doc])}
+    assert found["pic.PNG"].is_image and found["pic.PNG"].kind == "image"
+    assert not found["notes.md"].is_image
+    assert found["notes.md"].kind == "Markdown"
+
+
+def test_the_prompt_names_every_path_absolutely(tmp_path):
+    """Hermes's --image flag is refused whenever a gateway is running, so
+    attachments travel as absolute paths in the prompt. A relative one
+    would resolve against a working directory that is nobody's."""
+    img = tmp_path / "pic.png"
+    img.write_bytes(b"\x89PNG")
+    doc = tmp_path / "notes.txt"
+    doc.write_text("hello")
+    found = attachments.collect([img, doc])
+    prompt = attachments.compose("what is this", found)
+    for item in found:
+        assert str(item.path) in prompt
+        assert Path(str(item.path)).is_absolute()
+    assert "vision_analyze" in prompt
+    assert "read_file" in prompt
+
+
+def test_a_prompt_without_attachments_is_untouched():
+    assert attachments.compose("just a question", []) == "just a question"
+
+
+def test_a_large_file_is_flagged_rather_than_silently_read(tmp_path):
+    big = tmp_path / "big.log"
+    big.write_text("x" * (attachments.LARGE_FILE_BYTES + 10))
+    prompt = attachments.compose("summarise", attachments.collect([big]))
+    assert "large" in prompt.lower()
+
+
+def test_an_image_mentions_vision_and_not_read_file(tmp_path):
+    img = tmp_path / "pic.jpg"
+    img.write_bytes(b"\xff\xd8")
+    prompt = attachments.compose("look", attachments.collect([img]))
+    assert "vision_analyze" in prompt
+    assert "read_file" not in prompt
