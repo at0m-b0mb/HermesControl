@@ -126,6 +126,32 @@ class GatewayPage(Page):
         card.add(self._allow_warning)
         layout.addWidget(card)
 
+        # One channel's credentials at a time. Slack needs two tokens and
+        # Teams three, so a field per secret inline in the row would make
+        # the table unreadable; opening a form keeps each channel's shape
+        # its own business.
+        self._form = w.Card("Connect a channel", accent=True)
+        self._form_title = w.label("", "body_bold")
+        self._form.add(self._form_title)
+        self._form_help = w.label("", "Faint", wrap=True)
+        self._form.add(self._form_help)
+        self._form_fields = QVBoxLayout()
+        self._form_fields.setSpacing(8)
+        self._form.add_layout(self._form_fields)
+        self._form_status = w.label("", "Faint", wrap=True)
+        self._form.add(self._form_status)
+        self._form.add(w.row(
+            w.button("Save and restart the gateway", "Primary",
+                     self._save_channel),
+            w.button("Cancel", "Quiet",
+                     lambda: self._form.setVisible(False)),
+            w.spacer()))
+        self._form.setVisible(False)
+        self._editing = None
+        self._inputs = {}
+        self._env: dict = {}
+        layout.addWidget(self._form)
+
         # Proof, rather than inference: a message that arrives came through
         # the gateway's own delivery path, with no model and no agent loop
         # in the way to be blamed for a failure.
@@ -295,6 +321,7 @@ class GatewayPage(Page):
             item = self._channel_box.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        self._env = data["secrets_full"]
         survey = data["survey"]
         words = {"live": ("CONNECTED", "live"),
                  "blocked": ("NOBODY ALLOWED", "attention"),
@@ -322,6 +349,14 @@ class GatewayPage(Page):
                 action = w.button(
                     "Set up", "",
                     lambda c=state.channel: self._setup_channel(c))
+            elif state.channel.secrets and state.state != "live":
+                # The row used to say "paste the token below" with nothing
+                # below to paste it into. A channel whose setup is a few
+                # secrets deserves a form, not an instruction.
+                action = w.button(
+                    "Connect", "Primary" if state.missing else "",
+                    lambda c=state.channel: self._open_form(c))
+            if action is not None:
                 action.setFixedWidth(96)
             holder = QWidget()
             line = QHBoxLayout(holder)
@@ -386,6 +421,96 @@ class GatewayPage(Page):
             "is never displayed here.")
         self._message.setText(
             f"Platforms active: {status.platforms or 'none configured'}")
+
+    def _open_form(self, channel) -> None:
+        """Show the fields one channel needs, and only those."""
+        self._editing = channel
+        self._inputs = {}
+        self._form.setVisible(True)
+        self._form_title.setText(f"Connect {channel.name}")
+        self._form_help.setText(channel.how)
+        self._form_status.setText("")
+        while self._form_fields.count():
+            item = self._form_fields.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        env = self._env
+        for secret in channel.secrets:
+            field = QLineEdit()
+            field.setEchoMode(QLineEdit.EchoMode.Password)
+            field.setPlaceholderText(
+                "already set — leave blank to keep it"
+                if env.get(secret) else secret)
+            self._inputs[secret] = field
+            self._form_fields.addWidget(
+                self._labelled(secret, field, 420))
+
+        if channel.allow_key:
+            allow = QLineEdit()
+            allow.setText(env.get(channel.allow_key, ""))
+            allow.setPlaceholderText("your own account id")
+            self._inputs[channel.allow_key] = allow
+            self._form_fields.addWidget(
+                self._labelled(channel.allow_key, allow, 420))
+            self._form_fields.addWidget(w.label(
+                "Hermes denies anyone not listed here, and says nothing "
+                "when it does — so a channel left empty connects, receives "
+                "your message and ignores it, which looks exactly like a "
+                "broken bot. Put your own id in before you test it.",
+                "Faint", wrap=True))
+
+    def _save_channel(self) -> None:
+        channel = self._editing
+        if channel is None:
+            return
+        pairs = {}
+        for key, field in self._inputs.items():
+            value = field.text().strip()
+            # A blank secret means "keep what is there", not "erase it" —
+            # the field never shows the stored value, so treating empty as
+            # a deletion would silently disconnect a working channel the
+            # moment someone opened the form to read it.
+            if value or (key == channel.allow_key and
+                         self._env.get(key, "") != value):
+                pairs[key] = value
+        if not pairs:
+            self._form_status.setText("Nothing to save.")
+            return
+        missing = [s for s in channel.secrets
+                   if not pairs.get(s) and not self._env.get(s)]
+        if missing:
+            self._form_status.setText(
+                f"{channel.name} needs {', '.join(missing)} as well — "
+                f"it fails with an unhelpful error on a partial setup.")
+            return
+        self._form_status.setText("Saving\u2026")
+
+        def work():
+            results = [self.hermes.config_set(k, v) for k, v in pairs.items()]
+            # The gateway reads credentials at start. Without this the
+            # channel stays unreachable and the page correctly but
+            # confusingly reports "configured, not reachable".
+            restart = self.hermes.gateway("restart")
+            return results, restart
+
+        def done(outcome):
+            results, restart = outcome
+            bad = [r for r in results if not r.ok]
+            if bad:
+                self._form_status.setText(
+                    (bad[0].stderr or bad[0].stdout or bad[0].message).strip())
+                return
+            self._form_status.setText(
+                "Saved and the gateway restarted. Checking whether it can "
+                "reach the channel\u2026" if restart.ok else
+                f"Saved, but the gateway did not restart: "
+                f"{(restart.stderr or restart.message).strip()}")
+            self._form.setVisible(False)
+            self.refresh()
+
+        self.jobs.run(work, done,
+                      lambda e: self._form_status.setText(e))
 
     def _setup_channel(self, channel) -> None:
         """Hand an interactive setup flow to a real terminal.
