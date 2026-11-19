@@ -289,6 +289,10 @@ def test_reload_unloads_first_then_loads_at_the_floor(monkeypatch):
     monkeypatch.setattr(providers, "lms_available", lambda: True)
     monkeypatch.setattr(providers.subprocess, "run",
                         lambda cmd, **kw: calls.append(cmd) or Done())
+    # The reload verifies itself by asking the server again, because a
+    # context length the machine cannot hold reports a clean load and
+    # then takes the server down. Stand a healthy answer in for that.
+    monkeypatch.setattr(providers, "probe_lmstudio", lambda *a, **k: _served())
     ok, _ = providers.lms_reload("m", 65_536)
     assert ok
     assert calls[0][1:] == ["unload", "m"]
@@ -305,3 +309,45 @@ def test_reload_failure_reports_the_servers_own_words(monkeypatch):
     monkeypatch.setattr(providers.subprocess, "run", lambda cmd, **kw: Failed())
     ok, detail = providers.lms_reload("m")
     assert not ok and "model not found" in detail
+
+
+def _served(name: str = "m", window: int = 65_536) -> providers.LocalServer:
+    """An LM Studio answering with one healthy, loaded model."""
+    server = providers.LocalServer("LM Studio", "lmstudio",
+                                   "http://127.0.0.1:1234/v1")
+    server.reachable = True
+    server.models = [providers.LocalModel(
+        name=name, server="LM Studio", context=window, size_bytes=1,
+        capabilities=("tool_use",), loaded_context=window, loaded=True)]
+    return server
+
+
+def test_a_reload_that_kills_the_server_is_not_reported_as_success(monkeypatch):
+    """Asking for a window the machine cannot hold printed a clean
+    "reloaded successfully" and left nothing listening on the port. The
+    exit code is not evidence; the server answering again is."""
+    class Done:
+        returncode = 0
+        stdout = stderr = ""
+
+    dead = providers.LocalServer("LM Studio", "lmstudio", "x")
+    dead.reachable = False
+    monkeypatch.setattr(providers, "lms_available", lambda: True)
+    monkeypatch.setattr(providers.subprocess, "run", lambda cmd, **kw: Done())
+    monkeypatch.setattr(providers, "probe_lmstudio", lambda *a, **k: dead)
+    ok, detail = providers.lms_reload("m", 131_072)
+    assert not ok
+    assert "stopped answering" in detail
+
+
+def test_a_reload_that_lands_under_the_floor_is_not_success(monkeypatch):
+    class Done:
+        returncode = 0
+        stdout = stderr = ""
+
+    monkeypatch.setattr(providers, "lms_available", lambda: True)
+    monkeypatch.setattr(providers.subprocess, "run", lambda cmd, **kw: Done())
+    monkeypatch.setattr(providers, "probe_lmstudio",
+                        lambda *a, **k: _served(window=8_192))
+    ok, detail = providers.lms_reload("m")
+    assert not ok and "8,192" in detail

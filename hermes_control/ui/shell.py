@@ -206,7 +206,9 @@ class Shell(QMainWindow):
         return self._mode
 
     def cycle_appearance(self) -> None:
-        order = [theme.AUTO, theme.LIGHT, theme.DARK]
+        # Hermes last, so the two house themes stay one key apart and the
+        # third is a deliberate choice rather than something you land on.
+        order = [theme.AUTO, theme.LIGHT, theme.DARK, theme.HERMES]
         self._choice = order[(order.index(self._choice) + 1) % len(order)
                              ] if self._choice in order else theme.AUTO
         self.settings.setValue("appearance", self._choice)

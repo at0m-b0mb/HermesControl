@@ -26,7 +26,7 @@ AA_LARGE = 3.0
 #: Secondary ink on a dark ground gets a stricter floor than AA. See module docstring.
 DARK_SECONDARY_FLOOR = 7.0
 
-MODES = (theme.LIGHT, theme.DARK)
+MODES = theme.MODES
 
 #: (ink token, ground token, minimum ratio, what it is)
 TEXT_PAIRS = [

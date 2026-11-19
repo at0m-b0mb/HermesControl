@@ -226,7 +226,15 @@ def lms_available() -> bool:
     return LMS_CLI.is_file() and os.access(LMS_CLI, os.X_OK)
 
 
-def lms_reload(model: str, context: int = MIN_CONTEXT_WINDOW,
+#: What to ask LM Studio for when reloading. Deliberately the floor and not
+#: the model's maximum: a window the machine cannot hold reports a clean
+#: load and then kills the server, and the floor is the smallest value that
+#: makes the model usable at all. Someone who wants more can set it in LM
+#: Studio, where the memory cost is shown before committing to it.
+RELOAD_CONTEXT = MIN_CONTEXT_WINDOW
+
+
+def lms_reload(model: str, context: int = RELOAD_CONTEXT,
                timeout: int = 300) -> tuple[bool, str]:
     """Reload a model in LM Studio at a context length Hermes will accept.
 
@@ -255,7 +263,30 @@ def lms_reload(model: str, context: int = MIN_CONTEXT_WINDOW,
         detail = (done.stderr or done.stdout or "").strip().splitlines()
         return False, (detail[-1] if detail else
                        f"lms load exited {done.returncode}.")
-    return True, f"{model} reloaded at {context:,} tokens."
+
+    # Do not trust the exit code. A context length the machine cannot hold
+    # can report a successful load and then take the whole server down a
+    # moment later — asking for 131,072 on a model that was happy at 65,536
+    # did exactly that here, leaving "reloaded successfully" on screen and
+    # nothing listening on the port. The only honest confirmation is to ask
+    # the server again.
+    server = probe_lmstudio()
+    if not server.reachable:
+        return False, (
+            f"{model} reported a successful load at {context:,} tokens and "
+            f"then the server stopped answering — almost always a context "
+            f"length this machine cannot hold. Start LM Studio's server "
+            f"again and reload at a smaller window.")
+    live = next((m for m in server.models if m.name == model), None)
+    if live is None or not live.loaded:
+        return False, (
+            f"{model} loaded without error but the server does not list it "
+            f"as loaded. Check LM Studio directly.")
+    if live.effective_context < MIN_CONTEXT_WINDOW:
+        return False, (
+            f"{model} came back at {live.effective_context:,} tokens, still "
+            f"under the {MIN_CONTEXT_WINDOW:,} Hermes requires.")
+    return True, f"{model} reloaded at {live.effective_context:,} tokens."
 
 
 def probe_lmstudio(host: str = "http://127.0.0.1:1234") -> LocalServer:
@@ -357,6 +388,28 @@ def context_verdict(model: LocalModel | None, configured_num_ctx: Any = None) ->
                 f"Hermes requires, so every turn is refused. Reload it in LM "
                 f"Studio and raise the context length; this is a loading "
                 f"setting, not a limit of the model.")
+        # Hermes sizes its conversation compressor from ollama_num_ctx
+        # whatever the provider is — the log line says "Ollama num_ctx"
+        # while talking to LM Studio. If that disagrees with the window
+        # the server is really serving, compaction is scheduled in the
+        # wrong place: too high and a long conversation grows past what
+        # the server accepts and is silently truncated, which looks like
+        # the model forgetting rather than like a misconfiguration.
+        try:
+            configured = int(configured_num_ctx or 0)
+        except (TypeError, ValueError):
+            configured = 0
+        if window and configured and configured != window:
+            return Verdict(
+                False, "warn",
+                f"Hermes thinks the window is {configured:,}.",
+                f"LM Studio is serving {window:,}. Hermes sizes its "
+                f"conversation compressor from model.ollama_num_ctx, so it "
+                f"will compact in the wrong place — too late if that number "
+                f"is higher, and a long conversation then grows past what "
+                f"the server can take and loses its earlier turns without "
+                f"saying so.",
+                fix="model.ollama_num_ctx", fix_value=window)
         return Verdict(True, "ok", f"Loaded at {window:,} tokens.",
                        "Served by LM Studio.")
 

@@ -39,6 +39,7 @@ from typing import Any
 
 import yaml
 
+from . import auth
 from . import platforms
 
 #: Hermes needs at least this much context window; a local server serving less
@@ -621,6 +622,101 @@ class Hermes:
         if "not running" in text or "stopped" in text:
             return False
         return "running" in text
+
+    def update_check(self, timeout: float = 240.0) -> tuple[bool, str]:
+        """Ask Hermes whether a newer release exists. Changes nothing."""
+        result = self.run(["update", "--check"], timeout=timeout)
+        return result.returncode == 0, (result.stdout or result.stderr or "")
+
+    def update_plan(self, timeout: float = 240.0) -> Result:
+        """What an update would do, without doing any of it.
+
+        Worth having its own button: an update restarts every running
+        gateway across every profile, and someone is entitled to see
+        that listed before agreeing to it.
+        """
+        return self.run(["update", "--plan"], timeout=timeout)
+
+    def update_stream(self):
+        """Run the update, yielding output as it goes.
+
+        Streamed because it is long — a git pull, a dependency
+        reinstall, and a gateway restart — and a frozen window for two
+        minutes is indistinguishable from a hung one.
+        """
+        argv = [str(self.install.executable), "update", "--yes"]
+        proc = subprocess.Popen(
+            argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL, text=True, bufsize=1,
+            env=self.env(), creationflags=_CREATE_NO_WINDOW)
+        self._update_proc = proc
+        if proc.stdout is not None:
+            for line in proc.stdout:
+                yield line.rstrip()
+        proc.wait()
+        self._update_proc = None
+
+    def skills_check(self, timeout: float = 240.0) -> tuple[bool, str]:
+        result = self.run(["skills", "check"], timeout=timeout)
+        return result.returncode == 0, (result.stdout or result.stderr or "")
+
+    def skills_update_all(self, timeout: float = 600.0) -> Result:
+        return self.run(["skills", "update", "--yes"], timeout=timeout)
+
+    def prompt_size(self, timeout: float = 120.0) -> tuple[bool, str]:
+        """Hermes's own breakdown of what it sends before your message.
+
+        The only enumeration of the tool schemas actually in play. It is
+        what makes a capability briefing a statement of fact rather than
+        a list of things this app hopes are enabled.
+        """
+        result = self.run(["prompt-size"], timeout=timeout)
+        if result.returncode != 0:
+            return False, (result.stderr or result.stdout or
+                           f"prompt-size exited {result.returncode}")
+        return True, result.stdout
+
+    def auth_list(self, timeout: float = 90.0) -> tuple[bool, str]:
+        """The pooled credentials Hermes will actually draw on.
+
+        The only honest source for whether a hosted provider is usable.
+        A key in ``.env`` is not the same thing, and for an OAuth provider
+        there is no key to look for at all.
+        """
+        result = self.run(["auth", "list"], timeout=timeout)
+        if result.returncode != 0:
+            return False, (result.stderr or result.stdout or
+                           f"auth list exited {result.returncode}")
+        return True, result.stdout
+
+    def auth_sign_in_stream(self, provider: str):
+        """Run a provider sign-in, yielding each line as it is printed.
+
+        This must stream. A device-code flow prints a URL and a short code
+        and then blocks until the person has used them, so capturing the
+        output and returning it at the end shows the code only once the
+        flow has already finished or timed out — which is to say, never
+        when it would be useful.
+        """
+        argv = [str(self.install.executable), *auth.sign_in_argv(provider)]
+        proc = subprocess.Popen(
+            argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL, text=True, bufsize=1,
+            env=self.env(), creationflags=_CREATE_NO_WINDOW)
+        self._auth_proc = proc
+        if proc.stdout is not None:
+            for line in proc.stdout:
+                yield line.rstrip()
+        proc.wait()
+        self._auth_proc = None
+
+    def cancel_sign_in(self) -> None:
+        proc = getattr(self, "_auth_proc", None)
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+
+    def auth_logout(self, provider: str, timeout: float = 90.0) -> Result:
+        return self.run(["auth", "logout", provider], timeout=timeout)
 
     def skills_search(self, query: str, source: str = "all",
                       limit: int = 30,

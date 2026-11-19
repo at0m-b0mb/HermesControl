@@ -17,6 +17,7 @@ what you ask next, so it is shown rather than hidden.
 from __future__ import annotations
 
 import html
+import json
 import re
 from pathlib import Path
 
@@ -26,10 +27,35 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import providers, theme, toolsets
+from ... import briefing, providers, theme, toolsets
 from ...cli import ChatStream, Event
 from .. import widgets as w
 from ..shell import Page
+
+
+def _arguments(raw: object, limit: int = 160) -> str:
+    """Render a tool call's arguments compactly.
+
+    ``{'path': 'notes.txt'}`` reads better as ``path=notes.txt``, and a
+    long ``content`` is summarised by size rather than dumped — the point
+    is to show what the agent is doing, not to reproduce the file it is
+    writing.
+    """
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (ValueError, TypeError):
+            return raw[:limit]
+    if not isinstance(raw, dict):
+        return "" if raw is None else str(raw)[:limit]
+    bits: list[str] = []
+    for key, value in raw.items():
+        text = value if isinstance(value, str) else json.dumps(value)
+        if len(text) > 60:
+            text = f"<{len(text)} chars>"
+        bits.append(f"{key}={text}")
+    joined = "  ".join(bits)
+    return joined if len(joined) <= limit else joined[:limit] + "\u2026"
 
 
 class ConsolePage(Page):
@@ -64,6 +90,12 @@ class ConsolePage(Page):
 
         self.ribbon = w.ContextRibbon()
         layout.addWidget(self.ribbon)
+
+        # What is happening right now, on one line. The transcript is the
+        # record; this is the pulse, and during a long tool call it is the
+        # only thing that distinguishes working from hung.
+        self._activity = w.label("", "MonoFaint")
+        layout.addWidget(self._activity)
 
         self._transcript = QTextEdit()
         self._transcript.setReadOnly(True)
@@ -137,13 +169,41 @@ class ConsolePage(Page):
             value = model_config.get(key)
             if isinstance(value, int) and value > window:
                 window = value
+        model_name = (model_config.get("default")
+                      or model_config.get("model") or "")
+        provider_key = model_config.get("provider") or ""
+
+        # The ribbon must draw the window the server will actually serve.
+        # `ollama_num_ctx` is a request, and LM Studio ignores it entirely:
+        # it serves whatever the model was loaded at. Drawing the configured
+        # number would put the compaction mark in the wrong place on a meter
+        # whose whole purpose is to show where compaction happens.
+        served = 0
+        served_by = ""
+        if providers.is_local(provider_key):
+            for server in providers.probe_local():
+                if not server.reachable:
+                    continue
+                for model in server.models:
+                    if model.name == model_name and model.loaded:
+                        served = model.effective_context
+                        served_by = server.name
+        skills = hermes.skills()
+        prompt_ok, prompt_text = hermes.prompt_size()
         return {
             "installed": hermes.installed,
-            "model": model_config.get("default") or model_config.get("model") or "",
-            "provider": model_config.get("provider") or "",
-            "window": window,
+            "model": model_name,
+            "provider": provider_key,
+            "window": served or window,
+            "served_by": served_by,
             "threshold": compression.get("threshold", 0.5),
             "target": compression.get("target_ratio", 0.2),
+            "briefing": briefing.build(
+                prompt_text, prompt_ok, model=model_name,
+                provider=served_by or provider_key, window=served or window,
+                workdir=str(self._workdir), skills=len(skills),
+                skills_broken=sum(1 for s in skills if s.get("missing")),
+                error="" if prompt_ok else prompt_text),
         }
 
     def _setup_failed(self, error: str) -> None:
@@ -152,6 +212,7 @@ class ConsolePage(Page):
         self._state.setText(f"Could not read the model setup: {error}")
 
     def _setup_read(self, data: dict) -> None:
+        self._briefing = data.get("briefing")
         self._window = data["window"]
         self._threshold = float(data["threshold"] or 0.5)
         self._target = float(data["target"] or 0.2)
@@ -164,8 +225,12 @@ class ConsolePage(Page):
         else:
             # "hosted" was being claimed for an unset provider, because
             # is_local("") is False. Only say where it runs once we know.
-            where = "local" if providers.is_local(provider) else "hosted"
-            self._model_label.setText(f"{model}  ·  {where}")
+            where = str(data.get("served_by") or
+                        ("local" if providers.is_local(provider) else "hosted"))
+            window = data["window"]
+            self._model_label.setText(
+                f"{model}  ·  {where}" +
+                (f"  ·  {int(window):,} tokens" if window else ""))
 
         # Offering Send when a turn cannot possibly start produces a stack
         # trace instead of an answer. Say why, and point at the fix.
@@ -187,7 +252,7 @@ class ConsolePage(Page):
                 self._state.setText("")
 
         self._show_workdir()
-        if not self._transcript.toPlainText().strip():
+        if getattr(self, "_empty", False) or not self._transcript.toPlainText().strip():
             self._show_empty_state()
         self.ribbon.set_budget(0, self._window, self._threshold, self._target)
         self.ribbon.apply_mode(self.app.mode)
@@ -238,30 +303,102 @@ class ConsolePage(Page):
         bar.setValue(bar.maximum())
 
     def _show_empty_state(self) -> None:
-        """Say what this panel is for while it is still empty.
+        """Brief the user on what this agent can actually do.
 
-        A QTextEdit placeholder renders only its first line, so the hint is
+        A QTextEdit placeholder renders only its first line, so this is
         written as real content and cleared on the first message. On first
-        open this panel is most of the window, and an explanation is worth
-        more than a blank rectangle — particularly the part about what a
-        local model will and will not manage.
+        open the panel is most of the window, and the question everyone
+        has — *can it really touch my files?* — is answerable here from
+        the tool schemas Hermes reports it is sending, rather than left
+        to be discovered by trying.
         """
         mode = self.app.mode
         faint = theme.color("ink_faint", mode)
+        muted = theme.color("ink_muted", mode)
         brass = theme.color("brass", mode)
+        ink = theme.color("ink", mode)
+        mono = theme.mono()
+        sans = theme.sans()
+        brief = getattr(self, "_briefing", None)
+
+        def rule(title: str) -> str:
+            return (f'<p style="color:{brass};font-family:{sans};font-size:10px;'
+                    f'letter-spacing:1.4px;margin-top:16px;margin-bottom:2px">'
+                    f'{html.escape(title)}</p>')
+
+        rows: list[str] = []
+        if brief is not None:
+            facts = [("MODEL", brief.model or "none selected"),
+                     ("SERVED BY", brief.provider or "unknown"),
+                     ("WINDOW", f"{brief.window:,} tokens" if brief.window
+                      else "unknown"),
+                     ("WORKING IN", brief.workdir)]
+            if brief.window and brief.read:
+                facts.append((
+                    "ROOM TO TALK",
+                    f"~{brief.headroom():,} tokens after the system prompt "
+                    f"and tool schemas"))
+            rows.append(
+                '<table cellpadding="0" cellspacing="0">' + "".join(
+                    f'<tr><td style="color:{faint};font-family:{sans};'
+                    f'font-size:10px;letter-spacing:1.2px;padding-right:18px">'
+                    f'{k}</td><td style="color:{ink};font-family:{mono};'
+                    f'font-size:12px">{html.escape(str(v))}</td></tr>'
+                    for k, v in facts) + "</table>")
+
+        if brief is not None and brief.read and brief.toolsets:
+            rows.append(rule(f"{brief.tool_count} TOOLS IN {len(brief.toolsets)} SETS"))
+            for toolset in brief.toolsets:
+                plain = toolset.plain
+                rows.append(
+                    f'<div style="font-family:{mono};font-size:12px;'
+                    f'color:{ink}">{html.escape(toolset.name)}'
+                    f'<span style="color:{faint}"> &times;{toolset.tools}</span>'
+                    + (f'<span style="color:{muted};font-family:{sans}">'
+                       f' &nbsp;&nbsp;{html.escape(plain)}</span>' if plain else "")
+                    + "</div>")
+            can = []
+            if brief.can_edit_files:
+                can.append("edit files")
+            if brief.can_run_commands:
+                can.append("run commands")
+            if brief.can_see_images:
+                can.append("read images")
+            if can:
+                rows.append(
+                    f'<p style="color:{muted};font-family:{sans};font-size:13px;'
+                    f'margin-top:10px">This model is being handed tools to '
+                    f'<b style="color:{ink}">{html.escape(", ".join(can))}</b>. '
+                    f'Whether it uses them competently is a separate question '
+                    f'— ask it to do something in two steps and watch.</p>')
+        elif brief is not None and not brief.read:
+            rows.append(
+                f'<p style="color:{muted};font-family:{sans};font-size:13px">'
+                f'The tool list could not be read, so what this agent can do '
+                f'is not stated here rather than guessed at. '
+                f'{html.escape(brief.error[:200])}</p>')
+
+        if brief is not None and brief.skills:
+            broken = (f' &nbsp;<span style="color:{theme.color("fault", mode)}">'
+                      f'{brief.skills_broken} cannot run</span>'
+                      if brief.skills_broken else "")
+            rows.append(rule("SKILLS"))
+            rows.append(
+                f'<div style="font-family:{mono};font-size:12px;color:{ink}">'
+                f'{brief.skills} installed{broken}</div>')
+
+        rows.append(
+            f'<p style="color:{muted};font-family:{sans};font-size:13px;'
+            f'margin-top:16px">Ask something and the reply streams in as it '
+            f'is generated. Every tool call appears here with its arguments '
+            f'and how long it took. The meter above shows how full the '
+            f'window is and where Hermes starts compacting the conversation '
+            f'rather than truncating it.</p>')
+
         self._transcript.setHtml(
-            f'<div style="color:{faint};font-family:{theme.sans()};'
-            f'font-size:13px;line-height:150%">'
-            f'<p style="color:{brass};font-size:10px;letter-spacing:1.4px">'
-            f'NOTHING YET</p>'
-            f'<p>Ask something and the reply streams in as it is generated. '
-            f'The meter above shows how full the context window is, and where '
-            f'Hermes starts compacting the conversation rather than '
-            f'truncating it.</p>'
-            f'<p>Tools run with your permissions, in the directory shown '
-            f'below. A local model handles conversation well; multi-step work '
-            f'— editing files, running commands — generally needs a hosted '
-            f'provider.</p></div>')
+            f'<div style="line-height:150%">'
+            f'<p style="color:{brass};font-family:{sans};font-size:10px;'
+            f'letter-spacing:1.4px">READY</p>' + "".join(rows) + "</div>")
         self._empty = True
 
     def _clear_empty_state(self) -> None:
@@ -350,14 +487,29 @@ class ConsolePage(Page):
             self._flush()
             self._tool_depth += 1
             name = event.tool or "tool"
-            self._append(f"calling {name}", "brass", label="tool")
+            # The arguments are the interesting part. "calling read_file"
+            # says the agent did something; "read_file path=notes.txt" says
+            # what, which is the difference between watching a turn and
+            # being able to check it.
+            self._append(f"{name}  {_arguments(event.raw.get('input'))}",
+                         "brass", label="tool")
+            self._activity.setText(f"\u25b8 {name} {_arguments(event.raw.get('input'))}"[:120])
             return
 
         if kind == "tool_result":
             body = str(event.output)
             if len(body) > 700:
-                body = body[:700] + f"\n… {len(body) - 700} more characters"
-            self._append(body or "(no output)", "ink_muted", label="result")
+                body = body[:700] + f"\n\u2026 {len(body) - 700} more characters"
+            took = event.raw.get("duration_ms")
+            failed = bool(event.raw.get("is_error"))
+            tag = "result"
+            if took:
+                tag = f"result · {int(took)} ms"
+            if failed:
+                tag = f"{tag} · FAILED"
+            self._append(body or "(no output)",
+                         "fault" if failed else "ink_muted", label=tag)
+            self._activity.setText("")
             return
 
         if kind == "result":

@@ -28,6 +28,7 @@ from .ui.pages.schedule import SchedulePage
 from .ui.pages.setup import SetupPage
 from .ui.pages.skills import SkillsPage
 from .ui.pages.soul import SoulPage
+from .ui.pages.updates import UpdatesPage
 from .ui.shell import Shell
 
 #: Rail order. Groups are drawn from each page's ``group``.
@@ -35,7 +36,7 @@ PAGES = (
     SetupPage, RuntimePage, ConsolePage, ModelsPage,   # Runtime
     SoulPage, SkillsPage, MemoryPage,           # Agent
     SchedulePage, GatewayPage, ConnectorsPage, McpPage,  # Automation
-    ConfigPage, DoctorPage, ColophonPage,       # Installation
+    ConfigPage, UpdatesPage, DoctorPage, ColophonPage,  # Installation
 )
 
 

@@ -25,6 +25,13 @@ _IS_WIN = platform.system() == "Windows"
 
 LIGHT = "light"
 DARK = "dark"
+#: The official Hermes Agent palette: a near-black teal ground with warm
+#: cream ink, taken from the dashboard's own CSS custom properties rather
+#: than from a screenshot. Offered as a third mode instead of replacing
+#: the house theme, because the two are different answers to the same
+#: question and the choice is the user's.
+HERMES = "hermes"
+MODES = (LIGHT, DARK, HERMES)
 AUTO = "auto"
 
 
@@ -133,55 +140,68 @@ RADIUS = {"sharp": 0, "small": 3, "card": 6, "pill": 999}
 
 @dataclass(frozen=True)
 class Pair:
+    """A colour in every mode this app has.
+
+    The third value defaults to the dark one rather than being required.
+    That is the point: the Hermes mode is a *recolouring* of the dark
+    theme, not a third palette to maintain, so a token only states a
+    hermes value where the official palette genuinely differs. Anything
+    left alone stays consistent with the dark theme it is derived from,
+    and no token can be silently forgotten.
+    """
+
     light: str
     dark: str
+    hermes: str = ""
 
     def get(self, mode: str) -> str:
+        if mode == HERMES:
+            return self.hermes or self.dark
         return self.dark if mode == DARK else self.light
 
 
 PALETTE: dict[str, Pair] = {
     # grounds
-    "canvas":        Pair("#F3F1EC", "#000000"),
-    "surface":       Pair("#FFFFFF", "#131312"),
-    "surface_alt":   Pair("#FAF8F4", "#1B1B19"),
-    "sunken":        Pair("#EBE7DE", "#0A0A09"),
-    "rail":          Pair("#EDEAE2", "#0B0B0A"),
+    "canvas":        Pair("#F3F1EC", "#000000", "#041C1C"),
+    "surface":       Pair("#FFFFFF", "#131312", "#072625"),
+    "surface_alt":   Pair("#FAF8F4", "#1B1B19", "#092C2A"),
+    "sunken":        Pair("#EBE7DE", "#0A0A09", "#021413"),
+    "rail":          Pair("#EDEAE2", "#0B0B0A", "#031A19"),
 
     # lines
-    "rule":          Pair("#DCD6C9", "#2B2B28"),
-    "rule_strong":   Pair("#C4BCAA", "#3D3C38"),
+    "rule":          Pair("#DCD6C9", "#2B2B28", "#113B39"),
+    "rule_strong":   Pair("#C4BCAA", "#3D3C38", "#1B544F"),
 
     # ink. The dark halves sit high on purpose: a mid-grey passes AA on true
     # black and still reads as washed out.
-    "ink":           Pair("#1B1813", "#F3F0E9"),
-    "ink_muted":     Pair("#575144", "#B8B2A6"),
-    "ink_faint":     Pair("#6B6554", "#A6A096"),
-    "ink_inverse":   Pair("#FFFFFF", "#0A0A09"),
+    "ink":           Pair("#1B1813", "#F3F0E9", "#FFE6CB"),
+    "ink_muted":     Pair("#575144", "#B8B2A6", "#D9C6AC"),
+    "ink_faint":     Pair("#6B6554", "#A6A096", "#C9B9A1"),
+    "ink_inverse":   Pair("#FFFFFF", "#0A0A09", "#021413"),
 
     # gold, twice over
-    "brass":         Pair("#7A5D18", "#D9B75C"),   # legible as text
-    "shine":         Pair("#C39B24", "#F1C84B"),   # marks only, never text
-    "brass_wash":    Pair("#F7F0DC", "#221D0E"),
-    "brass_edge":    Pair("#E3D4A5", "#463A1A"),
+    "brass":         Pair("#7A5D18", "#D9B75C", "#E8C06A"),   # legible as text
+    "shine":         Pair("#C39B24", "#F1C84B", "#F3D37E"),   # marks only, never text
+    "brass_wash":    Pair("#F7F0DC", "#221D0E", "#14301D"),
+    "brass_edge":    Pair("#E3D4A5", "#463A1A", "#3F4A24"),
 
     # selection and focus
-    "select":        Pair("#E6DFCB", "#2A2519"),
-    "focus":         Pair("#7A5D18", "#D9B75C"),
+    "select":        Pair("#E6DFCB", "#2A2519", "#0E3B37"),
+    "focus":         Pair("#7A5D18", "#D9B75C", "#E8C06A"),
 
     # state — what a process or a check can be saying
-    "live":          Pair("#2C6249", "#67BE94"),
-    "live_wash":     Pair("#E9F3ED", "#0D1F16"),
-    "idle":          Pair("#6B6554", "#9A948A"),
-    "idle_wash":     Pair("#F1EFE9", "#161613"),
-    "attention":     Pair("#8A5410", "#DDA356"),
-    "attention_wash": Pair("#FAF0DF", "#251A0B"),
-    "fault":         Pair("#8C1F16", "#EE8B82"),
-    "fault_wash":    Pair("#FBE9E7", "#2A100E"),
+    "live":          Pair("#2C6249", "#67BE94", "#34D399"),
+    "live_wash":     Pair("#E9F3ED", "#0D1F16", "#07302A"),
+    "idle":          Pair("#6B6554", "#9A948A", "#9FAFA6"),
+    "idle_wash":     Pair("#F1EFE9", "#161613", "#07211F"),
+    "attention":     Pair("#8A5410", "#DDA356", "#E9B169"),
+    "attention_wash": Pair("#FAF0DF", "#251A0B", "#2A2410"),
+    "fault":         Pair("#8C1F16", "#EE8B82", "#F59C92"),
+    "fault_wash":    Pair("#FBE9E7", "#2A100E", "#331614"),
 
     # where a model runs — the one distinction the Models page is built on
-    "local":         Pair("#2C6249", "#67BE94"),
-    "remote":        Pair("#5A4A7A", "#B0A0D0"),
+    "local":         Pair("#2C6249", "#67BE94", "#34D399"),
+    "remote":        Pair("#5A4A7A", "#B0A0D0", "#B9A7DC"),
 }
 
 

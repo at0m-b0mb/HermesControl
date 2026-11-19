@@ -298,6 +298,16 @@ def disk_free_gb(path: Path) -> float:
 
 # --- opening things for the user --------------------------------------------
 
+def app_root() -> Path:
+    """Where this app's own checkout lives.
+
+    Two levels up from this file: ``<root>/hermes_control/platforms.py``.
+    Used to tell someone where to run ``git pull``, so it has to be the
+    repository and not the package inside it.
+    """
+    return Path(__file__).resolve().parent.parent
+
+
 def reveal(path: Path) -> None:
     """Show a file or folder in the platform's file manager."""
     try:

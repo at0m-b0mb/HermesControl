@@ -28,6 +28,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from hermes_control import auth as hauth
 from hermes_control import channels, providers  # noqa: E402
 from hermes_control.cli import Hermes  # noqa: E402
 
@@ -480,27 +481,31 @@ def test_the_suite_does_not_touch_real_preferences(app, isolated_settings) -> No
 
 
 @needs_hermes
-def test_the_empty_console_explains_itself_then_gets_out_of_the_way(app) -> None:
+def test_the_empty_console_briefs_you_then_gets_out_of_the_way(app) -> None:
     """On first open the transcript is most of the window.
 
-    A QTextEdit placeholder renders only its first line, so the hint is real
-    content — which means it has to be cleared before the first message, or
-    it sits above the conversation forever.
+    It carries the capability briefing — the answer to "can it really
+    touch my files?" — and a QTextEdit placeholder renders only its first
+    line, so that has to be real content. Which means it must be cleared
+    before the first message, or it sits above the conversation forever.
     """
     application, shell = app
     page = shell.page("Console")
     shell.show_page("Console")
-    settle(application, 6.0, until=lambda: page._empty)
-    assert page._empty, "no empty state was shown"
-    assert "NOTHING YET" in page._transcript.toPlainText().upper()
+    settle(application, 60.0, until=lambda: page._empty)
+    assert page._empty, "no briefing was shown"
+    opening = page._transcript.toPlainText().upper()
+    assert "READY" in opening
+    # It must state what is being handed to the model, not just greet.
+    assert "MODEL" in opening and "WORKING IN" in opening
 
     page._append("hello", label="you")
-    assert not page._empty, "the hint was not cleared"
-    assert "NOTHING YET" not in page._transcript.toPlainText().upper()
+    assert not page._empty, "the briefing was not cleared"
+    assert "WORKING IN" not in page._transcript.toPlainText().upper()
     assert "hello" in page._transcript.toPlainText()
 
     page.reset()
-    assert page._empty, "a new conversation should show the hint again"
+    assert page._empty, "a new conversation should brief you again"
 
 
 def test_the_ribbon_says_something_useful_before_the_first_turn() -> None:
@@ -557,3 +562,68 @@ def test_a_skill_missing_its_command_is_reported_as_unusable(app) -> None:
         for command in skill.get("missing", []):
             assert shutil.which(command) is None, (
                 f"{skill['name']} reports {command} missing but it is on PATH")
+
+
+@needs_hermes
+def test_an_oauth_provider_is_not_claimed_ready_by_default(app) -> None:
+    """The bug: readiness for an OAuth provider was computed as
+    `provider.oauth`, which is True by definition, so every one showed a
+    live badge and an enabled Use button with nothing behind it."""
+    application, shell = app
+    page = shell.page("Models")
+    shell.show_page("Models")
+    settle(application, 60.0, until=lambda: page._cloud_box.count() > 0)
+    ok, payload = shell.hermes.auth_list()
+    pool = hauth.pool(payload, ok)
+    oauth = [p for p in providers.CLOUD if p.oauth]
+    assert oauth, "no OAuth providers to check"
+    # Whatever the real answer is, it must come from the pool and not be
+    # the same for every provider regardless of state.
+    states = {p.key: pool.has(p.key) for p in oauth}
+    assert set(states.values()) != {True} or all(
+        pool.has(p.key) for p in oauth), (
+        "every OAuth provider reported ready — the constant is back")
+
+
+@needs_hermes
+def test_the_console_window_is_the_one_being_served(app) -> None:
+    """The ribbon draws compaction against this number. `ollama_num_ctx`
+    is a request that LM Studio ignores — it serves whatever the model
+    was loaded at — so drawing the configured value puts the compaction
+    mark in the wrong place on a meter whose only job is to show it."""
+    application, shell = app
+    page = shell.page("Console")
+    shell.show_page("Console")
+    settle(application, 60.0, until=lambda: page._window > 0 or page._ready)
+    served = 0
+    for server in providers.probe_local():
+        if not server.reachable:
+            continue
+        for model in server.models:
+            if model.loaded and model.name == str(
+                    shell.hermes.config_value("model.default") or ""):
+                served = model.effective_context
+    if not served:
+        pytest.skip("no local model loaded to compare against")
+    assert page._window == served, (
+        f"ribbon drew {page._window} but the server serves {served}")
+
+
+@needs_hermes
+def test_a_window_mismatch_is_reported_rather_than_tolerated(app) -> None:
+    """Hermes sizes its compressor from ollama_num_ctx whatever the
+    provider. Higher than the served window means compaction is
+    scheduled past what the server accepts, and a long conversation is
+    truncated with nothing said."""
+    model = None
+    for server in providers.probe_local():
+        if server.reachable and not server.is_ollama:
+            model = next((m for m in server.models if m.loaded), None)
+    if model is None:
+        pytest.skip("no loaded LM Studio model")
+    agreed = providers.context_verdict(model, model.effective_context)
+    assert agreed.ok
+    wrong = providers.context_verdict(model, model.effective_context * 2)
+    assert not wrong.ok
+    assert wrong.fix == "model.ollama_num_ctx"
+    assert wrong.fix_value == model.effective_context

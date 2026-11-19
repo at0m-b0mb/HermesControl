@@ -17,12 +17,20 @@ fix exists.
 from __future__ import annotations
 
 from PySide6.QtWidgets import (QHBoxLayout, QLineEdit, QProgressBar,
+                               QTextEdit,
                                QVBoxLayout, QWidget)
 
+from ... import auth as hauth
 from ... import providers
 from ...ollama import KNOWN_TOO_SMALL, SUGGESTED, Ollama, PullProgress
 from .. import widgets as w
 from ..shell import Page
+
+
+def _read_auth(hermes):
+    """``hermes auth list`` as (payload, ok, error), ready for ``auth.pool``."""
+    ok, payload = hermes.auth_list()
+    return (payload if ok else "", ok, "" if ok else payload)
 
 
 class ModelsPage(Page):
@@ -36,6 +44,8 @@ class ModelsPage(Page):
         self._pull_job = None
         self._pulling = ""
         self._reloading = ""
+        self._signing_in = ""
+        self._sign_in_text = ""
         self._pull_layers: set[str] = set()
 
         body = QWidget()
@@ -121,6 +131,32 @@ class ModelsPage(Page):
         self._cloud_card.add_layout(self._cloud_box)
         layout.addWidget(self._cloud_card)
 
+        # A device-code flow prints a URL and a short code and then blocks.
+        # Both have to be on screen while the person uses them, so this card
+        # appears for the duration of a sign-in and stays out of the way
+        # otherwise.
+        self._sign_in_card = w.Card("Sign in", accent=True)
+        self._sign_in_title = w.label("", "body_bold")
+        self._sign_in_card.add(self._sign_in_title)
+        self._sign_in_code = w.label("", "Mono", wrap=True)
+        self._sign_in_card.add(self._sign_in_code)
+        self._sign_in_log = QTextEdit()
+        self._sign_in_log.setReadOnly(True)
+        self._sign_in_log.setMinimumHeight(140)
+        self._sign_in_log.setProperty("role", "Mono")
+        self._sign_in_card.add(self._sign_in_log)
+        self._sign_in_card.add(w.row(
+            w.button("Cancel", "Danger", self._cancel_sign_in),
+            w.button("Hide", "Quiet",
+                     lambda: self._sign_in_card.setVisible(False)),
+            w.spacer()))
+        self._sign_in_card.add(w.label(
+            "The code and the password are yours to enter — this app opens "
+            "the flow and reports what it says, and never handles either.",
+            "Faint", wrap=True))
+        self._sign_in_card.setVisible(False)
+        layout.addWidget(self._sign_in_card)
+
         self._message = w.label("", "Faint", wrap=True)
         layout.addWidget(self._message)
         layout.addStretch(1)
@@ -145,6 +181,7 @@ class ModelsPage(Page):
             "num_ctx": hermes.config_value("model.ollama_num_ctx"),
             "context_length": hermes.config_value("model.context_length"),
             "secrets": set(hermes.read_env().keys()),
+            "auth": hauth.pool(*_read_auth(hermes)),
         }
 
     def _show(self, data: dict) -> None:
@@ -214,21 +251,52 @@ class ModelsPage(Page):
         # --- hosted --------------------------------------------------------
         self._clear(self._cloud_box)
         secrets = data["secrets"]
+        pool = data["auth"]
+        if not pool.read:
+            self._cloud_box.addWidget(w.label(
+                f"Hermes's credential pool could not be read, so these rows "
+                f"are guesses from .env: {pool.error}", "Faint", wrap=True))
         for provider in providers.CLOUD:
             if provider.key in ("custom", "auto"):
                 continue
-            have = provider.credential in secrets if provider.credential else provider.oauth
-            badge = w.Badge(
-                "KEY SET" if have and provider.credential else
-                "OAUTH" if provider.oauth else "NO KEY",
-                "live" if have else "idle")
+            # The pool is the real answer. A key in .env that Hermes has not
+            # taken into its pool is not a usable credential, and for an
+            # OAuth provider there is no key to look for at all — which is
+            # why this used to read `provider.oauth`, a constant, and claim
+            # every OAuth provider was ready.
+            pooled = pool.has(provider.key) if pool.read else False
+            keyed = bool(provider.credential) and provider.credential in secrets
+            have = pooled or keyed
+            if provider.oauth:
+                word, token = (("SIGNED IN", "live") if pooled
+                               else ("NOT SIGNED IN", "idle"))
+            else:
+                word, token = (("KEY SET", "live") if have else ("NO KEY", "idle"))
+            badge = w.Badge(word, token)
+            badge.setFixedWidth(130)
             badge.apply_mode(mode)
             name = w.label(provider.label, "body_bold")
             name.setFixedWidth(170)
             use = w.button("Use", "", lambda p=provider: self._use_cloud(p))
             use.setEnabled(bool(have))
+            if not have:
+                use.setToolTip(
+                    "Sign in first — selecting a provider with no credential "
+                    "behind it makes every turn fail somewhere else"
+                    if provider.oauth else
+                    f"Set {provider.credential} first")
             widgets = [name, badge]
-            if provider.credential:
+            if provider.oauth:
+                # The button that was missing entirely.
+                action = w.button(
+                    "Sign out" if pooled else "Sign in",
+                    "" if pooled else "Primary",
+                    (lambda p=provider: self._sign_out(p)) if pooled
+                    else (lambda p=provider: self._sign_in(p)))
+                action.setFixedWidth(230)
+                action.setEnabled(not self._signing_in)
+                widgets.append(action)
+            elif provider.credential:
                 field = QLineEdit()
                 field.setPlaceholderText(provider.credential)
                 field.setEchoMode(QLineEdit.EchoMode.Password)
@@ -512,6 +580,40 @@ class ModelsPage(Page):
 
     def _use_local(self, server: providers.LocalServer,
                    model: providers.LocalModel) -> None:
+        # Selecting a model LM Studio has not loaded writes a config that
+        # points at nothing: the server answers, the model is absent, and
+        # every turn fails. Load it first, then select it — the two steps
+        # are one intention.
+        if not server.is_ollama and not model.loaded:
+            if not providers.lms_available():
+                self._message.setText(
+                    f"{model.name} is not loaded in LM Studio, and the lms "
+                    f"CLI is not here to load it. Load it in LM Studio at "
+                    f"{providers.MIN_CONTEXT_WINDOW:,} tokens or more, then "
+                    f"rescan.")
+                return
+            self._message.setText(
+                f"{model.name} is not loaded — loading it first\u2026")
+            self.jobs.run(
+                lambda n=model.name: providers.lms_reload(n),
+                lambda outcome, s=server, m=model: self._loaded_then_use(
+                    outcome, s, m),
+                lambda e: self._message.setText(e))
+            return
+        self._apply_local(server, model)
+
+    def _loaded_then_use(self, outcome: tuple[bool, str],
+                         server: providers.LocalServer,
+                         model: providers.LocalModel) -> None:
+        ok, detail = outcome
+        self._message.setText(detail)
+        if ok:
+            self._apply_local(server, model)
+        else:
+            self.refresh()
+
+    def _apply_local(self, server: providers.LocalServer,
+                     model: providers.LocalModel) -> None:
         pairs = {
             "model.provider": providers.canonical_provider(server.provider_key),
             "model.base_url": server.base_url,
@@ -526,7 +628,78 @@ class ModelsPage(Page):
             # send a request without one, and whatever the last provider set
             # would otherwise be left in place.
             pairs["model.api_key"] = "lmstudio"
+            # And tell Hermes the window the server will really serve.
+            #
+            # Hermes sizes its compressor from this key whatever the
+            # provider — the log line even calls it "Ollama num_ctx" while
+            # talking to LM Studio. Left at a previous model's value it
+            # believed 131,072 against a server serving 65,536, so
+            # compaction was scheduled past the point the server can
+            # accept and a long conversation grew until it was silently
+            # truncated. Nothing anywhere reported that; the thread simply
+            # started going missing.
+            if model.effective_context:
+                pairs["model.ollama_num_ctx"] = model.effective_context
         self._set_keys(pairs)
+
+    def _sign_in(self, provider: providers.CloudProvider) -> None:
+        """Sign in to a hosted provider, showing the device code as it
+        arrives.
+
+        The flow prints a URL and a short code and then blocks until the
+        person has used them, so the output has to be streamed — waiting
+        for the command to finish would show the code only after it had
+        expired.
+        """
+        if self._signing_in:
+            return
+        self._signing_in = provider.key
+        self._sign_in_text = ""
+        self._sign_in_card.setVisible(True)
+        self._sign_in_title.setText(f"Signing in to {provider.label}")
+        self._sign_in_code.setText("waiting for a code\u2026")
+        self._sign_in_log.setPlainText("")
+        self.refresh()
+        self.jobs.stream(
+            lambda p=provider.key: self.hermes.auth_sign_in_stream(p),
+            self._on_sign_in_line, self._on_sign_in_done,
+            lambda e: self._on_sign_in_done(None, e))
+
+    def _on_sign_in_line(self, line: str) -> None:
+        self._sign_in_text += line + "\n"
+        self._sign_in_log.setPlainText(self._sign_in_text)
+        bar = self._sign_in_log.verticalScrollBar()
+        bar.setValue(bar.maximum())
+        url, code = hauth.extract_code(self._sign_in_text)
+        if code or url:
+            self._sign_in_code.setText(
+                f"Code: {code}\n{url}" if code else url)
+
+    def _on_sign_in_done(self, _result=None, error: str = "") -> None:
+        self._signing_in = ""
+        if error:
+            self._sign_in_code.setText(f"Sign-in failed: {error}")
+        else:
+            self._sign_in_code.setText(
+                "Flow finished. If it succeeded the badge now reads "
+                "SIGNED IN; if it still says NOT SIGNED IN, the sign-in "
+                "did not complete.")
+        self.refresh()
+
+    def _cancel_sign_in(self) -> None:
+        self.hermes.cancel_sign_in()
+        self._signing_in = ""
+        self._sign_in_code.setText("Cancelled.")
+        self.refresh()
+
+    def _sign_out(self, provider: providers.CloudProvider) -> None:
+        self._message.setText(f"Signing out of {provider.label}\u2026")
+        self.jobs.run(lambda p=provider.key: self.hermes.auth_logout(p),
+                      lambda r: (self._message.setText(
+                          "Signed out." if r.ok else
+                          (r.stderr or r.stdout or r.message).strip()),
+                          self.refresh()),
+                      lambda e: self._message.setText(e))
 
     def _use_cloud(self, provider: providers.CloudProvider) -> None:
         pairs = {"model.provider": provider.key}

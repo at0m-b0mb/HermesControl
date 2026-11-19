@@ -30,7 +30,7 @@ Hermes already ships a terminal UI, a web dashboard and an Electron app, so a fo
 |---|---|
 | **Setup** | Four steps from nothing to a working agent: host check, install Hermes, get a model, done. |
 | **Runtime** | Version, channel, commit, interpreter. Isolation, stated explicitly. Gateway start/stop/restart. Host prerequisites. |
-| **Console** | Chat, streamed token by token, with a live context-budget ribbon. |
+| **Console** | Chat, streamed token by token. Opens with a briefing of every tool the model is actually being handed; each call shows its arguments, timing and result. Live context-budget ribbon. |
 | **Models** | Local servers probed live — the window a model is *served* at, not the one it advertises, plus tool and vision support as the server reports them; a model library with one-click download; ~22 hosted providers. |
 | **Soul** | `SOUL.md` — the agent's identity, first slot in its system prompt. |
 | **Skills** | Installed procedures and whether each can actually run; a search across every registry Hermes knows; the three routes to your own mailbox. |
@@ -40,8 +40,27 @@ Hermes already ships a terminal UI, a web dashboard and an Electron app, so a fo
 | **Connectors** | The ~54 apps Hermes can act on, and the one Nous Portal sign-in they all depend on. |
 | **MCP** | The Nous-approved MCP catalogue, plus adding any server beyond it by URL or command. |
 | **Config** | All ~240 options, searchable, with upstream's help text. |
+| **Updates** | Hermes Agent, hub skills and this app, each checked against its own source and named for what it is a version *of*. |
 | **Doctor** | Hermes's own checks, and its logs. |
 | **Colophon** | What this is built from, and the decisions worth stating. |
+
+### Three themes
+
+Light and true-black are the house pair. The third is **Hermes** — the official dashboard's own palette (`#041C1C` ground, `#FFE6CB` ink), read from its CSS custom properties rather than sampled from a screenshot. It is a recolouring of the dark theme rather than a third palette to maintain: a token declares a Hermes value only where the official one genuinely differs, so nothing can be silently forgotten. All three are held to the same WCAG AA contrast floors by the same test.
+
+### The briefing
+
+The Console opens on the question everyone actually has — *can it really touch my files?* — answered from the tool schemas Hermes reports it is sending, not from what this app hopes is enabled:
+
+```
+19 TOOLS IN 11 SETS
+file ×4      read, write, patch and search files
+terminal ×1  run shell commands
+vision ×1    look at images
+…
+```
+
+It also states the room left for conversation after the system prompt and tool schemas, because on a 65,536-token window those are most of it.
 
 ### The ribbon
 
@@ -55,7 +74,19 @@ Two of Hermes's requirements are checkable from what the server reports — a 64
 
 ```bash
 python3 tools/model_bench.py            # every model, both servers
-python3 tools/model_bench.py hermes3    # or just some
+python3 tools/tool_check.py             # does it use its tools, really
+```
+
+`tool_check.py` asks the harder question and scores every check on an **effect**, never on what the model said. A model that replies "I have created the file" and creates nothing fails — that answer is indistinguishable from success in a transcript, and is the commonest way a weak local model looks like it is working.
+
+```
+check      result      time  tools called
+write      PASS       12.0s  write_file
+read       PASS       10.7s  read_file
+edit       PASS       17.2s  read_file, write_file
+search     PASS       16.5s  search_files, write_file
+shell      PASS       27.7s  terminal, read_file
+5 of 5 checks passed.
 ```
 
 Each model gets the same task in a throwaway directory — read a file, write it back with a line added — and is scored on whether the file actually changed. Two steps rather than one on purpose: a single write can be luck, while read-then-write needs the model to carry a result from one call into the next, which is where the weak ones fall over.
@@ -111,7 +142,23 @@ The two email rows are different directions and are constantly mistaken for each
 
 A skill with an unmet prerequisite installs cleanly, appears in every listing, and fails the first time the agent reaches for it. On this machine eight of the fifty-eight were in that state, `himalaya` among them. The Skills page checks each skill's declared commands against the host and marks the ones that cannot run, because "installed" and "usable" are not the same claim.
 
+## Long conversations, and the window nobody agrees on
+
+Hermes does not truncate a long conversation — past `compression.threshold` of the window it rewrites the middle into a summary and continues, which is what makes a conversation able to run indefinitely.
+
+That only works if everyone agrees what the window *is*, and here they did not. Hermes sizes its compressor from `model.ollama_num_ctx` **whatever the provider** — the log line says "Ollama num_ctx" while talking to LM Studio. Left at a previous model's value it believed 131,072 against a server serving 65,536, so compaction was scheduled past the point the server can accept, and a long conversation grew until it was silently truncated. Nothing reported that. The thread simply started going missing, which reads as the model forgetting rather than as a misconfiguration.
+
+Selecting an LM Studio model now writes the served window alongside it, and a disagreement between the two is reported beside the model with the exact key to fix.
+
 ## Connectors, channels and email
+
+**Hosted providers are judged by Hermes's own credential pool**, not by what sits in `.env`. The previous version decided readiness like this:
+
+```python
+have = provider.credential in secrets if provider.credential else provider.oauth
+```
+
+For a key-based provider that works. For an **OAuth** one the credential name is empty, so the expression collapses to `provider.oauth` — a constant, `True` by definition. Every OAuth provider therefore showed a live badge and an enabled **Use** button whether or not anyone had ever signed in, and offered no way to sign in at all. `hermes auth list` is the real answer, and the rows now carry a sign-in that streams the device code as it arrives.
 
 **Connectors** are the third-party apps Hermes can act on — Linear, Notion, Slack, Stripe and ~50 more. Every one is brokered by **Nous Portal**, so none work until that account is signed in. The connector listing never says this; each row just reads `not connected`, which looks like fifty separate problems rather than one missing sign-in. The Connectors page leads with exactly that.
 
@@ -186,7 +233,7 @@ On macOS 26 (Darwin 27), Python 3.13, PySide6 6.12 / Qt 6.12, against Hermes Age
 
 - Isolated install into `~/.hermes-agent`, leaving an unrelated `~/.hermes` byte-identical by SHA-256.
 - All 11 pages render in both themes with no exceptions (`tools/shoot.py`).
-- **258 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
+- **323 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
 - A chat turn end to end *through the interface*: typed into the Console, streamed back, answer in the transcript, token accounting delivered to the ribbon.
 - Editing a setting and pressing Apply is asserted to reach `config.yaml`, and the original is restored.
 - Every local model's verdict is checked against what Ollama actually reports, and a model under the floor is asserted to be unselectable.
