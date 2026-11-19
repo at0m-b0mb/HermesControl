@@ -20,7 +20,7 @@ Hermes already ships a terminal UI, a web dashboard and an Electron app, so a fo
 
 **2. "Every setting" is a promise worth keeping literally.** Hermes's configuration runs to roughly 240 options across 42 sections. This app contains no list of them. It derives its schema from the annotated `config.yaml` that *your install shipped with*, so it describes your version of Hermes — including options added after this code was written — with upstream's own prose as the help text.
 
-**3. Local models have two traps in them.** Hermes refuses any model whose context window is under **64,000 tokens** — Ollama serves 32,768 by default, and plenty of popular models were never trained past 40K. Separately, Hermes sends a tool list on *every* request, so a model with no tool-calling support is refused with HTTP 400 before it produces a token: `deepseek-r1` has a 131,072-token window, chats perfectly well, and cannot be an agent. Left alone, either one produces a turn that dies a minute in for a reason nothing surfaces. Here they produce a verdict beside the model, before you pick it, naming which requirement failed.
+**3. Local models have three traps in them.** Hermes refuses any model whose context window is under **64,000 tokens** — Ollama serves 32,768 by default, and plenty of popular models were never trained past 40K. Separately, Hermes sends a tool list on *every* request, so a model with no tool-calling support is refused with HTTP 400 before it produces a token: `deepseek-r1` has a 131,072-token window, chats perfectly well, and cannot be an agent. And LM Studio serves a model at the context length chosen when it was *loaded*, which defaults far below what the model supports — the server reports it as healthy, Hermes refuses every turn, and neither interface connects the two. Left alone, each produces a turn that dies a minute in for a reason nothing surfaces. Here they produce a verdict beside the model, before you pick it, naming which requirement failed — and for the LM Studio case, a button that reloads the model at a window that works.
 
 ---
 
@@ -31,12 +31,12 @@ Hermes already ships a terminal UI, a web dashboard and an Electron app, so a fo
 | **Setup** | Four steps from nothing to a working agent: host check, install Hermes, get a model, done. |
 | **Runtime** | Version, channel, commit, interpreter. Isolation, stated explicitly. Gateway start/stop/restart. Host prerequisites. |
 | **Console** | Chat, streamed token by token, with a live context-budget ribbon. |
-| **Models** | Local servers probed live; a model library with one-click download and removal; ~22 hosted providers with the credential each needs. |
+| **Models** | Local servers probed live — the window a model is *served* at, not the one it advertises, plus tool and vision support as the server reports them; a model library with one-click download; ~22 hosted providers. |
 | **Soul** | `SOUL.md` — the agent's identity, first slot in its system prompt. |
-| **Skills** | Installed procedures, including ones the agent wrote for itself. |
+| **Skills** | Installed procedures and whether each can actually run; a search across every registry Hermes knows; the three routes to your own mailbox. |
 | **Memory** | The two curated files injected into every session. |
 | **Cron** | Scheduled jobs, and whether the gateway is up to run them. |
-| **Gateway** | The process serving every messaging channel, and a full email setup form with a staged connection test. |
+| **Gateway** | The process serving every channel, each judged by asking the gateway what it can reach; a test message to prove one; a full email setup form with a staged connection test. |
 | **Connectors** | The ~54 apps Hermes can act on, and the one Nous Portal sign-in they all depend on. |
 | **MCP** | The Nous-approved MCP catalogue, plus adding any server beyond it by URL or command. |
 | **Config** | All ~240 options, searchable, with upstream's help text. |
@@ -51,14 +51,23 @@ The meter on the Console is the one thing here no other tool could show, because
 
 ## Which models can actually be agents
 
-Two of Hermes's requirements are checkable — a 64,000-token window and tool-calling support, both of which Ollama reports. The third is not: whether the model can *use* tools competently. Several popular models pass both checks, answer ordinary chat perfectly, and still cannot complete a two-step job.
+Two of Hermes's requirements are checkable from what the server reports — a 64,000-token window and tool-calling support. The third is not: whether the model can *use* tools competently. Several popular models pass both checks, answer ordinary chat perfectly, and still cannot complete a two-step job.
 
 ```bash
-python3 tools/model_bench.py            # every installed model
+python3 tools/model_bench.py            # every model, both servers
 python3 tools/model_bench.py hermes3    # or just some
 ```
 
 Each model gets the same task in a throwaway directory — read a file, write it back with a line added — and is scored on whether the file actually changed. Two steps rather than one on purpose: a single write can be luck, while read-then-write needs the model to carry a result from one call into the next, which is where the weak ones fall over.
+
+Measured here:
+
+| Model | Server | Window | Tools | Images | Result |
+|---|---|---|---|---|---|
+| `google/gemma-4-e4b` | LM Studio | 65,536 | yes | yes | **completed it, 13 s** |
+| seven models, 1B–30B | Ollama | ≥64K | yes | — | none completed it |
+
+The seven include Nous's own `hermes3` and `mistral-small` at 24B. They acknowledge Hermes's correction when a call is malformed and then do not act on it. So the serving stack turns out to matter as much as the model, and a result does not transfer between servers — which is the argument for benchmarking rather than reasoning about it.
 
 ---
 
@@ -81,36 +90,43 @@ The published context window gets a model onto your disk; the **measured** one d
 
 ---
 
-## Four extension surfaces, and why email is on none of the obvious ones
+## Five extension surfaces, and where email actually is
 
-This trips everyone up, so the MCP page leads with it. People look for email under Connectors, don't find it, and reasonably conclude something is broken.
+This trips everyone up, so both the Skills and MCP pages lead with it. People look for email under Connectors, don't find it, and reasonably conclude Hermes cannot touch a mailbox.
 
 | What you want | Where it actually lives |
 |---|---|
-| **Email** | Hermes's own **IMAP/SMTP gateway platform** — the Gateway page. **Not a connector, and not in the MCP catalogue either.** |
-| Messaging | Gateway platforms: Telegram, Discord, Slack, WhatsApp, Signal |
+| **People emailing the agent** | Hermes's own **IMAP/SMTP gateway platform** — the Gateway page |
+| **The agent reading and sending from your mailbox** | A **skill** — the Skills page. Not a connector, not an MCP server |
+| Messaging | Gateway platforms: Telegram, Discord, Slack, WhatsApp, Teams, Google Chat |
 | App accounts | Portal connectors — ~54, all gated behind one Nous Portal sign-in |
 | New tools | **MCP servers** — a Nous-approved catalogue, plus `add` for anything beyond it |
-| Procedures | Skills, including ones the agent writes for itself |
+| Procedures | **Skills** — 58 ship with an install, and `skills search` reaches thousands more |
 
-Verified rather than assumed: **neither catalogue contains a Gmail or email entry** — only `close`, a sales CRM. Hermes's own `connectors connect --help` says *"for example gmail"*, and gmail is absent from the list; the help text is wrong, not the catalogue.
+The two email rows are different directions and are constantly mistaken for each other. The gateway adapter is **inbound**: someone writes to the agent's mailbox and it replies. It gives the agent no ability to read your mail. For that you install a skill, and the Skills page names three routes with what each actually needs — `himalaya` for any provider, Gmail's own API, or Microsoft Graph.
 
----
+**An earlier version of this README said email was on none of the obvious surfaces, having checked the connector list and the MCP catalogue and found nothing.** That was wrong, because it was the wrong two lists. `hermes skills search email` returns twenty-five results, and `himalaya` is already installed by default — it simply cannot run until its binary is on the machine, which nothing told you.
 
-## Connectors and email
+### The gap that produces
 
-**Connectors** are the third-party apps Hermes can act on — Linear, Notion, Slack, Stripe and ~50 more. Every one of them is brokered by **Nous Portal**, so none work until that account is signed in. The connector listing never says this; each row just reads `not connected`, which looks like fifty separate problems rather than one missing sign-in. The Connectors page leads with exactly that.
+A skill with an unmet prerequisite installs cleanly, appears in every listing, and fails the first time the agent reaches for it. On this machine eight of the fifty-eight were in that state, `himalaya` among them. The Skills page checks each skill's declared commands against the host and marks the ones that cannot run, because "installed" and "usable" are not the same claim.
 
-Signing in, and connecting each app, are browser flows against your own accounts with your own passwords and second factors. The app opens them and reports the outcome — it does not handle those credentials.
+## Connectors, channels and email
 
-**Email** is a first-class gateway platform: Hermes polls an IMAP mailbox and replies over SMTP, so anyone you allow can simply write to the agent. The Gateway page has the full form, with host settings filled in from your address, and everything stored in `.env` rather than `config.yaml` because the keys are `UPPER_SNAKE`.
+**Connectors** are the third-party apps Hermes can act on — Linear, Notion, Slack, Stripe and ~50 more. Every one is brokered by **Nous Portal**, so none work until that account is signed in. The connector listing never says this; each row just reads `not connected`, which looks like fifty separate problems rather than one missing sign-in. The Connectors page leads with exactly that.
 
-Two things that form knows, which save a long detour:
+**Channels are judged by asking the gateway, not by reading `.env`.** A token being present proves nothing, and the three states that matter look alike from outside:
+
+- **Configured** — the credentials are in `.env`. Easiest to check, least informative: a token can be present and wrong.
+- **Allowed** — someone is on that channel's allowlist. Hermes denies by default, so a correctly configured channel with an empty allowlist connects, receives your message, and ignores it in silence. This is the most confusing failure here, because every visible sign says it is working.
+- **Deliverable** — `hermes send --list` reports it as a target. This is the only one that is evidence, because it uses the credentials the gateway really loaded.
+
+The Gateway page shows all three per channel and offers a **test message**, which goes through the gateway's own delivery path with no model and no agent loop in the way — so a message that arrives proves the channel and nothing else is being tested alongside it.
+
+**Email as an inbound channel** is a first-class gateway platform: Hermes polls an IMAP mailbox and replies over SMTP. Two things that form knows, which save a long detour:
 
 - **Gmail, Outlook, iCloud and Yahoo all refuse ordinary passwords.** You need an app password, and the error they return for the account password is an unhelpful generic failure. The form says so before the attempt.
 - **"It doesn't work" has several very different causes** — DNS, a blocked port, TLS, a wrong password, IMAP disabled on the account. The connection test runs in stages and reports the first one that failed, by name, instead of one flat refusal.
-
----
 
 ## Install
 
@@ -170,12 +186,15 @@ On macOS 26 (Darwin 27), Python 3.13, PySide6 6.12 / Qt 6.12, against Hermes Age
 
 - Isolated install into `~/.hermes-agent`, leaving an unrelated `~/.hermes` byte-identical by SHA-256.
 - All 11 pages render in both themes with no exceptions (`tools/shoot.py`).
-- **243 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
+- **258 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
 - A chat turn end to end *through the interface*: typed into the Console, streamed back, answer in the transcript, token accounting delivered to the ribbon.
 - Editing a setting and pressing Apply is asserted to reach `config.yaml`, and the original is restored.
 - Every local model's verdict is checked against what Ollama actually reports, and a model under the floor is asserted to be unselectable.
 - **Conversation continuity is asserted mechanically**: a resumed turn reuses the same session, opens no new one, and shows a larger input-token count because the earlier turn is now in the prompt.
 - **Exceptions inside Qt callbacks fail the test.** They do not reach the caller — Qt hands them to `sys.excepthook` and carries on with a half-drawn page — so without this a broken page renders and passes.
+- **A local model completing real agentic work**, through LM Studio: read a file, write it back changed, and separately describe an image correctly.
+- **The skill count is asserted against the files on disk**, which is how the two-level tree was caught: the page had been reporting twelve category folders as skills and losing all fifty-eight real ones.
+- Every channel's verdict is asserted to come from the gateway's own target listing, and the three states that look alike from outside — configured, allowed, deliverable — are asserted to be reported separately.
 
 ```bash
 ./.venv/bin/python -m pytest tests/ -q      # all of it, ~35s plus one real turn
@@ -189,14 +208,15 @@ Windows and Linux paths are implemented behind `platforms.py` but have **not** b
 
 ### A note on local model speed
 
-Two of the models tested clear the 64K floor honestly. They are not equivalent:
+Clearing the floor honestly does not make two models equivalent:
 
-| Model | Real window | Size | One trivial turn |
-|---|---|---|---|
-| `llama3.1:latest` | 131,072 | 4.9 GB | **31 s** |
-| `huihui_ai/qwen3.5-abliterated:35b` | 262,144 | 23.9 GB | **461 s** |
+| Model | Server | Served window | Size | One trivial turn |
+|---|---|---|---|---|
+| `google/gemma-4-e4b` | LM Studio | 65,536 | 6.9 GB | **7 s** |
+| `llama3.1:latest` | Ollama | 131,072 | 4.9 GB | 31 s |
+| `huihui_ai/qwen3.5-abliterated:35b` | Ollama | 262,144 | 23.9 GB | 461 s |
 
-Both return the right answer. The 35B is the capable one and is a single click away on the Models page; `llama3.1` is the default because a seven-minute round trip is not a usable default.
+All three return the right answer to a trivial question. Only the first completed the two-step job, which is the distinction that matters and the one speed does not predict.
 
 ---
 

@@ -21,7 +21,11 @@ before the user spends a minute waiting for the error.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
+import functools
+import os
+import subprocess
 
 import httpx
 
@@ -91,7 +95,19 @@ class LocalModel:
     size_bytes: int = 0
     family: str = ""
     detail: str = ""
-    capabilities: tuple[str, ...] = ()   # as Ollama reports them
+    capabilities: tuple[str, ...] = ()   # as the server reports them
+    #: LM Studio loads a model at a chosen context length that is usually far
+    #: below what it supports. The *loaded* value is what the server will
+    #: actually serve, so it is what Hermes's floor must be judged against —
+    #: a model advertising 262,144 and loaded at 8,192 is refused.
+    loaded_context: int = 0
+    vision: bool = False
+    loaded: bool = True
+
+    @property
+    def effective_context(self) -> int:
+        """The window the server will actually serve, not the one advertised."""
+        return self.loaded_context or self.context
 
     @property
     def supports_tools(self) -> bool | None:
@@ -105,7 +121,8 @@ class LocalModel:
         """
         if not self.capabilities:
             return None
-        return "tools" in self.capabilities
+        # Ollama says "tools"; LM Studio says "tool_use".
+        return any(c in ("tools", "tool_use") for c in self.capabilities)
 
     @property
     def size_label(self) -> str:
@@ -200,18 +217,85 @@ def probe_ollama(host: str = "http://localhost:11434") -> LocalServer:
     return server
 
 
+#: LM Studio ships a CLI alongside the app and does not put it on PATH.
+LMS_CLI = Path.home() / ".lmstudio" / "bin" / "lms"
+
+
+def lms_available() -> bool:
+    """Whether LM Studio's own CLI is on this machine."""
+    return LMS_CLI.is_file() and os.access(LMS_CLI, os.X_OK)
+
+
+def lms_reload(model: str, context: int = MIN_CONTEXT_WINDOW,
+               timeout: int = 300) -> tuple[bool, str]:
+    """Reload a model in LM Studio at a context length Hermes will accept.
+
+    This exists because the single most common LM Studio failure is not a
+    missing model or an unreachable server: it is a model loaded at the
+    app's default context length, far below both what the model supports
+    and what Hermes requires. The server reports it as present and healthy,
+    Hermes refuses every turn, and nothing in either interface connects the
+    two. The fix is a reload, which is a loading setting rather than a
+    property of the model — so it can be done from here.
+
+    The existing instance is unloaded first. Two copies of a large model
+    will not fit in memory, and ``lms load`` on an already-loaded model
+    adds a second instance rather than replacing the first.
+    """
+    if not lms_available():
+        return False, (f"LM Studio's CLI is not at {LMS_CLI}. Open LM Studio "
+                       f"once to install it, or reload the model in the app.")
+    run = functools.partial(subprocess.run, capture_output=True, text=True,
+                            timeout=timeout)
+    # An unload failure is not fatal: the model may simply not be loaded.
+    run([str(LMS_CLI), "unload", model], check=False)
+    done = run([str(LMS_CLI), "load", model,
+                "-c", str(context), "--gpu", "max", "-y"], check=False)
+    if done.returncode != 0:
+        detail = (done.stderr or done.stdout or "").strip().splitlines()
+        return False, (detail[-1] if detail else
+                       f"lms load exited {done.returncode}.")
+    return True, f"{model} reloaded at {context:,} tokens."
+
+
 def probe_lmstudio(host: str = "http://127.0.0.1:1234") -> LocalServer:
-    """LM Studio is first-class in Hermes and speaks the OpenAI shape."""
+    """LM Studio is first-class in Hermes and speaks the OpenAI shape.
+
+    Asked through its own REST API rather than ``/v1/models``, because the
+    OpenAI-compatible endpoint returns nothing but ids. ``/api/v0/models``
+    reports the three facts that decide whether a model can be used at all:
+    whether it does tool calling, whether it takes images, and — the one that
+    actually bites — the context length it is *currently loaded at*, which is
+    usually a small fraction of what it supports and is set in LM Studio when
+    the model is loaded.
+    """
     server = LocalServer("LM Studio", "lmstudio", f"{host}/v1")
-    data = _get(f"{host}/v1/models")
+    rich = _get(f"{host}/api/v0/models", timeout=4.0)
+    data = rich if rich is not None else _get(f"{host}/v1/models")
     if data is None:
         server.error = f"nothing answering on {host}"
         return server
     server.reachable = True
     for entry in (data.get("data") or []):
         name = entry.get("id") or ""
-        if name:
-            server.models.append(LocalModel(name=name, server="LM Studio"))
+        if not name:
+            continue
+        kind = str(entry.get("type") or "")
+        if kind == "embeddings":
+            continue          # not something a conversation can run on
+        caps = entry.get("capabilities")
+        model = LocalModel(
+            name=name, server="LM Studio",
+            context=int(entry.get("max_context_length") or 0),
+            loaded_context=int(entry.get("loaded_context_length") or 0),
+            capabilities=tuple(str(c) for c in caps) if isinstance(caps, list) else (),
+            vision=kind == "vlm",
+            loaded=str(entry.get("state") or "loaded") == "loaded",
+            family=str(entry.get("arch") or ""),
+            detail=str(entry.get("quantization") or ""),
+        )
+        server.models.append(model)
+    server.models.sort(key=lambda m: (not m.loaded, -m.effective_context, m.name))
     return server
 
 
@@ -256,8 +340,25 @@ def context_verdict(model: LocalModel | None, configured_num_ctx: Any = None) ->
             f"such as deepseek-r1 are the common case.")
 
     if model.server != "Ollama":
-        return Verdict(True, "ok", "Served by LM Studio.",
-                       "Hermes reads the window from the server.")
+        window = model.effective_context
+        if not model.loaded:
+            return Verdict(
+                True, "warn", "Not loaded in LM Studio.",
+                f"{model.name} supports {model.context:,} tokens but is not "
+                f"loaded, so its served window is unknown. Load it in LM "
+                f"Studio with a context length of at least "
+                f"{MIN_CONTEXT_WINDOW:,}.")
+        if window and window < MIN_CONTEXT_WINDOW:
+            return Verdict(
+                False, "error",
+                f"Loaded at only {window:,} tokens.",
+                f"{model.name} supports {model.context:,}, but LM Studio has "
+                f"it loaded at {window:,} — below the {MIN_CONTEXT_WINDOW:,} "
+                f"Hermes requires, so every turn is refused. Reload it in LM "
+                f"Studio and raise the context length; this is a loading "
+                f"setting, not a limit of the model.")
+        return Verdict(True, "ok", f"Loaded at {window:,} tokens.",
+                       "Served by LM Studio.")
 
     if not model.context:
         return Verdict(True, "warn", "Context window unknown.",

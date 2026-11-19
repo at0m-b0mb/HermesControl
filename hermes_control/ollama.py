@@ -72,17 +72,19 @@ SUGGESTED: tuple[Suggestion, ...] = (
                "parameters active per token."),
 )
 
-#: Measured on this machine with tools/model_bench.py: a two-step job (read a
-#: file, write it back with a line added), narrow toolset, scoped with --in.
-#: Not one of these completed it, including after two conversational nudges.
+#: Measured with tools/model_bench.py: a two-step job — read a file, write it
+#: back with a line added — narrow toolset, scoped with --in.
 #:
-#: The harness is not the problem. Hermes validates every malformed call with
-#: a precise, actionable error, refuses to overwrite a file with the
-#: line-numbered *display* text that read_file returns, and says exactly what
-#: to do instead. The models acknowledge the correction and then do not act on
-#: it. Treat "clears the window" and "supports tools" as necessary and not
-#: sufficient, and benchmark before trusting a model with real work.
-VERIFIED_AGENTIC: tuple[str, ...] = ()
+#: **Through Ollama, nothing passed.** Seven models from 1B to 30B, including
+#: Nous's own hermes3 and mistral-small 24B, all failed, and conversational
+#: nudging did not rescue them.
+#:
+#: **Through LM Studio, gemma-4-e4b passed in 13 seconds**, and also reads
+#: images. So the earlier conclusion — that local models cannot do agentic
+#: work — was too broad: it was true of what had been tried, and the serving
+#: stack turned out to matter as much as the model. Benchmark before
+#: trusting any of them, and do not assume a result transfers between servers.
+VERIFIED_AGENTIC: tuple[str, ...] = ("google/gemma-4-e4b",)
 
 #: Popular models with no tool-calling support. They chat perfectly well and
 #: cannot be agents: Hermes sends a tool list on every request, so the turn is

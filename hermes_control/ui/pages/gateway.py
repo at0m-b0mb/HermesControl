@@ -10,21 +10,15 @@ truth about what it cannot do from here.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import (QComboBox, QLineEdit, QSpinBox,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLineEdit,
+                               QSpinBox, QVBoxLayout, QWidget)
 
+from ... import channels as chan
 from ... import email as mail
+from ... import platforms
 from .. import widgets as w
 from ..shell import Page
 
-#: Platform, the secret that enables it, and how it is set up.
-PLATFORMS = [
-    ("Telegram", "TELEGRAM_BOT_TOKEN", "Create a bot with @BotFather, paste the token."),
-    ("Discord", "DISCORD_BOT_TOKEN", "Create an application, enable the message intent."),
-    ("Slack", "SLACK_BOT_TOKEN", "hermes slack manifest generates the app manifest."),
-    ("WhatsApp", "", "Pairing only: run hermes whatsapp in a terminal."),
-    ("Signal", "", "Pairing only, through signal-cli."),
-]
 
 
 class GatewayPage(Page):
@@ -118,16 +112,42 @@ class GatewayPage(Page):
         self._provider_chosen(self._provider.currentText())
         layout.addWidget(self._email)
 
-        channels = w.Card("Other channels")
+        card = w.Card("Messaging channels")
+        card.add(w.label(
+            "Whether a channel works is not what is written in .env — it is "
+            "whether the gateway can actually reach it. Each row below is "
+            "judged by asking the gateway for its delivery targets, which is "
+            "the only answer that uses the credentials it really loaded.",
+            "Faint", wrap=True))
         self._channel_box = QVBoxLayout()
         self._channel_box.setSpacing(4)
-        channels.add_layout(self._channel_box)
-        channels.add(w.label(
-            "Tokens are set on the Models page's pattern — any UPPER_SNAKE key "
-            "written through Hermes lands in .env, never in config.yaml. "
-            "Per-platform behaviour lives under the gateway section of Config.",
-            "Faint", wrap=True))
-        layout.addWidget(channels)
+        card.add_layout(self._channel_box)
+        self._allow_warning = w.label("", "Faint", wrap=True)
+        card.add(self._allow_warning)
+        layout.addWidget(card)
+
+        # Proof, rather than inference: a message that arrives came through
+        # the gateway's own delivery path, with no model and no agent loop
+        # in the way to be blamed for a failure.
+        self._proof = w.Card("Prove a channel works")
+        self._proof.add(w.label(
+            "A channel can be connected and still drop every message, "
+            "because the gateway denies anyone not on that channel's "
+            "allowlist and says nothing when it does. Sending one message "
+            "settles it.", "Faint", wrap=True))
+        self._target = QComboBox()
+        self._target.setMinimumWidth(240)
+        self._test_text = QLineEdit()
+        self._test_text.setPlaceholderText("Hermes Control test message")
+        self._proof.add(w.row(
+            self._labelled("TARGET", self._target, 260),
+            self._labelled("MESSAGE", self._test_text, 380), w.spacer()))
+        self._send_button = w.button("Send test message", "Primary",
+                                     self._send_test)
+        self._proof.add(w.row(self._send_button, w.spacer()))
+        self._proof_status = w.label("", "Faint", wrap=True)
+        self._proof.add(self._proof_status)
+        layout.addWidget(self._proof)
 
         self._message = w.label("", "Faint", wrap=True)
         layout.addWidget(self._message)
@@ -256,8 +276,10 @@ class GatewayPage(Page):
 
     def _gather(self) -> dict:
         env = self.hermes.read_env()
+        listed, listing = self.hermes.channel_targets()
         return {"status": self.hermes.status(),
-                "secrets": set(env.keys()),
+                "survey": chan.survey(env, listing, listed,
+                                      "" if listed else listing),
                 "secrets_full": env}
 
     def _show(self, data: dict) -> None:
@@ -273,15 +295,76 @@ class GatewayPage(Page):
             item = self._channel_box.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        for name, secret, how in PLATFORMS:
-            label = w.label(name, "body_bold")
-            label.setFixedWidth(110)
-            have = bool(secret) and secret in data["secrets"]
-            badge = w.Badge("CONFIGURED" if have else "NOT SET",
-                            "live" if have else "idle")
+        survey = data["survey"]
+        words = {"live": ("CONNECTED", "live"),
+                 "blocked": ("NOBODY ALLOWED", "attention"),
+                 "broken": ("NOT REACHABLE", "fault"),
+                 "unknown": ("UNKNOWN", "idle"),
+                 "off": ("NOT SET UP", "idle")}
+        for state in survey.states:
+            label = w.label(state.channel.name, "body_bold")
+            label.setFixedWidth(146)
+            word, token = words[state.state]
+            badge = w.Badge(word, token)
+            # Fixed, not minimum: a QLabel will happily absorb the slack in
+            # the row, and a pill stretched across half the card stops
+            # reading as a status mark at all.
+            badge.setFixedWidth(136)
             badge.apply_mode(self.app.mode)
-            self._channel_box.addWidget(w.row(
-                label, badge, w.label(how, "Faint", wrap=True), stretch_last=True))
+            text = w.label(f"{state.headline} {state.detail}", "Faint",
+                           wrap=True)
+            text.setMinimumWidth(1)
+            # Only offer a step that exists. A "Set up" button on a channel
+            # this Hermes has no setup command for would send the user
+            # somewhere there is nothing to do.
+            action = None
+            if state.channel.setup and state.state != "live":
+                action = w.button(
+                    "Set up", "",
+                    lambda c=state.channel: self._setup_channel(c))
+                action.setFixedWidth(96)
+            holder = QWidget()
+            line = QHBoxLayout(holder)
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(8)
+            line.addWidget(label)
+            line.addWidget(badge)
+            line.addWidget(text, 1)
+            if action is not None:
+                line.addWidget(action)
+            else:
+                line.addSpacing(104)
+            self._channel_box.addWidget(holder)
+
+        if not survey.listed:
+            self._allow_warning.setText(
+                f"The gateway could not be asked which channels it can "
+                f"reach, so these rows are read from .env alone and may be "
+                f"wrong: {survey.error}")
+        elif survey.allow_all:
+            self._allow_warning.setText(
+                f"{chan.ALLOW_ALL_KEY} is on, so every channel accepts "
+                f"messages from anyone who can find it. Each channel's own "
+                f"allowlist is being ignored.")
+        else:
+            self._allow_warning.setText("")
+
+        # The test target list is built from what the gateway says it can
+        # reach, so it can never offer a channel that would fail anyway.
+        self._target.clear()
+        for state in survey.live:
+            for target in state.targets or [state.channel.key]:
+                self._target.addItem(
+                    f"{state.channel.name} — {target}"
+                    if target != state.channel.key else state.channel.name,
+                    target if ":" in target else state.channel.key)
+        has_target = self._target.count() > 0
+        self._target.setEnabled(has_target)
+        self._send_button.setEnabled(has_target)
+        if not has_target:
+            self._proof_status.setText(
+                "Nothing to test yet — no channel is connected. Email is "
+                "separate and is tested with its own button above.")
         env = data["secrets_full"]
         if env.get("EMAIL_ADDRESS") and not self._address.text():
             self._address.setText(env["EMAIL_ADDRESS"])
@@ -303,6 +386,46 @@ class GatewayPage(Page):
             "is never displayed here.")
         self._message.setText(
             f"Platforms active: {status.platforms or 'none configured'}")
+
+    def _setup_channel(self, channel) -> None:
+        """Hand an interactive setup flow to a real terminal.
+
+        WhatsApp pairing draws a QR code and waits for a phone to scan it.
+        Reproducing that inside a widget would mean reimplementing a
+        terminal, and a half-drawn QR code is worse than none.
+        """
+        ok, detail = platforms.open_terminal(
+            self.hermes.install, channel.setup.split())
+        hint = platforms.terminal_hint(self.hermes.install)
+        self._message.setText(
+            f"{detail} Finish the pairing there, then press Rescan. "
+            f"If nothing opened, run: {hint} {channel.setup}"
+            if ok else
+            f"{detail} Run this yourself: {hint} {channel.setup}")
+
+    def _send_test(self) -> None:
+        target = self._target.currentData()
+        if not target:
+            return
+        text = (self._test_text.text().strip()
+                or "Hermes Control test message")
+        self._send_button.setEnabled(False)
+        self._proof_status.setText(f"Sending to {target}…")
+
+        def done(result) -> None:
+            self._send_button.setEnabled(True)
+            if result.ok:
+                self._proof_status.setText(
+                    f"Sent to {target}. If it arrived, that channel works "
+                    f"end to end. If it did not, the credentials reach the "
+                    f"platform but the destination is wrong.")
+            else:
+                self._proof_status.setText(
+                    f"Not sent: {result.stderr.strip() or result.message}")
+
+        self.jobs.run(lambda: self.hermes.send_test(target, text), done,
+                      lambda e: (self._send_button.setEnabled(True),
+                                 self._proof_status.setText(e)))
 
     def _act(self, action: str) -> None:
         self._message.setText(f"gateway {action}…")

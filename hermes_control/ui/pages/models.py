@@ -35,6 +35,7 @@ class ModelsPage(Page):
         self._ollama = Ollama()
         self._pull_job = None
         self._pulling = ""
+        self._reloading = ""
         self._pull_layers: set[str] = set()
 
         body = QWidget()
@@ -100,13 +101,13 @@ class ModelsPage(Page):
             + ", ".join(f"{n} ({c:,})" for n, c in KNOWN_TOO_SMALL),
             "Faint", wrap=True))
         self._library.add(w.label(
-            "A window and tool support are necessary, not sufficient. In "
-            "testing here, no local model from 1B to 30B completed a two-step "
-            "job — read a file, write it back with a line added — even after "
-            "being told exactly what it got wrong. They chat well and lose "
-            "the thread when the work has steps. Run tools/model_bench.py to "
-            "test a model before trusting it with real work, and prefer a "
-            "hosted provider for anything agentic.", "Faint", wrap=True))
+            "A window and tool support are necessary, not sufficient — a "
+            "model can have both and still lose the thread once the work has "
+            "steps. Seven models tried through Ollama all failed a two-step "
+            "job; gemma-4-e4b through LM Studio passed it in 13 seconds and "
+            "reads images too, so the serving stack matters as much as the "
+            "model. Run tools/model_bench.py before trusting any of them "
+            "with real work.", "Faint", wrap=True))
         layout.addWidget(self._library)
 
         # --- hosted ---------------------------------------------------------
@@ -162,7 +163,7 @@ class ModelsPage(Page):
                              if providers.is_local(provider_key) else "over the network")
         if data["base_url"]:
             self._current_kv.add("Endpoint", str(data["base_url"]), mono=True)
-        if data["num_ctx"]:
+        if data["num_ctx"] and provider_key in ("ollama", "custom"):
             self._current_kv.add("Asks for", f"{int(data['num_ctx']):,} tokens")
 
         # Judge the model in use against the floor.
@@ -284,17 +285,60 @@ class ModelsPage(Page):
         verdict = providers.context_verdict(model, data["num_ctx"])
         in_use = model.name == str(data["model"])
         name = w.label(model.name, "Mono")
-        name.setFixedWidth(300)
-        window = w.label(f"{model.context:,}" if model.context else "unknown",
-                         "MonoFaint")
-        window.setFixedWidth(78)
+        name.setFixedWidth(232)
+
+        # The *served* window, never the advertised one. LM Studio loads a
+        # model at a chosen length that is usually far below what it
+        # supports, and the loaded figure is the only one Hermes's floor is
+        # judged against — so printing the big number alone would promise a
+        # window that is not there. When they differ, both are shown.
+        served = model.effective_context
+        if served and model.context and served != model.context:
+            window_text = f"{served:,} of {model.context:,}"
+        elif served:
+            window_text = f"{served:,}"
+        else:
+            window_text = "unknown"
+        window = w.label(window_text, "MonoFaint")
+        window.setFixedWidth(136)
+        if served and model.context and served != model.context:
+            window.setToolTip(
+                f"Loaded at {served:,} tokens; the model itself supports "
+                f"{model.context:,}. Hermes judges the loaded figure, so "
+                f"this is what counts.")
+
         size = w.label(model.size_label, "MonoFaint")
-        size.setFixedWidth(62)
-        badge = w.Badge("IN USE" if in_use else
-                        ("USABLE" if verdict.ok or verdict.fix else "TOO SMALL"),
-                        "live" if in_use or verdict.ok else
-                        ("attention" if verdict.fix else "fault"))
+        size.setFixedWidth(58)
+
+        # What the model can do, as the server reports it rather than as its
+        # name suggests. Vision is here because it decides whether the agent
+        # can be handed a screenshot at all, and nothing else surfaces it.
+        marks: list[str] = []
+        if model.supports_tools:
+            marks.append("tools")
+        if model.vision:
+            marks.append("vision")
+        caps = w.label(" · ".join(marks), "MonoFaint")
+        caps.setFixedWidth(118)
+        caps.setToolTip("Capabilities reported by the server itself")
+
+        # Name the actual problem. "TOO SMALL" on a model refused for having
+        # no tool support sends you to fix the wrong thing.
+        if in_use:
+            word, token = "IN USE", "live"
+        elif not model.loaded:
+            word, token = "NOT LOADED", "attention"
+        elif model.supports_tools is False:
+            word, token = "NO TOOLS", "fault"
+        elif verdict.ok:
+            word, token = "USABLE", "live"
+        elif verdict.fix:
+            word, token = "NEEDS A SETTING", "attention"
+        else:
+            word, token = "TOO SMALL", "fault"
+        badge = w.Badge(word, token)
         badge.apply_mode(mode)
+        badge.setMinimumWidth(118)
         remove = w.button("Remove", "Quiet",
                           lambda n=model.name: self._delete(n))
         remove.setEnabled(server.is_ollama and not in_use
@@ -302,13 +346,32 @@ class ModelsPage(Page):
         remove.setToolTip("Delete this model from disk"
                           if remove.isEnabled() else
                           "A model in use cannot be removed")
+        # A model loaded below the floor is the one failure here that the app
+        # can simply undo, so it offers to rather than only explaining it.
+        needs_reload = (not server.is_ollama and providers.lms_available()
+                        and (not model.loaded
+                             or (model.effective_context
+                                 and model.effective_context
+                                 < providers.MIN_CONTEXT_WINDOW)))
+        reload_btn = w.button(
+            "Reload", "Quiet",
+            lambda n=model.name: self._lms_reload(n))
+        reload_btn.setVisible(bool(needs_reload))
+        reload_btn.setEnabled(bool(needs_reload) and not self._reloading)
+        reload_btn.setToolTip(
+            f"Reload in LM Studio at {providers.MIN_CONTEXT_WINDOW:,} tokens, "
+            f"the smallest window Hermes accepts")
+
         use = w.button("Use", "Primary" if not in_use else "",
                        lambda s=server, m=model: self._use_local(s, m))
-        use.setEnabled(not in_use and model.context >= providers.MIN_CONTEXT_WINDOW
-                       or (not in_use and not model.context))
+        # Judged on the verdict rather than on the window alone, so that a
+        # model loaded below the floor, or one with no tool support, is
+        # unselectable for the reason that actually applies to it.
+        use.setEnabled(not in_use and (verdict.ok or bool(verdict.fix)))
         if not use.isEnabled() and not in_use:
             use.setToolTip(verdict.detail or verdict.headline)
-        return w.row(name, window, size, badge, w.spacer(), remove, use)
+        return w.row(name, window, size, caps, badge, w.spacer(),
+                     reload_btn, remove, use)
 
     def _fail(self, error: str) -> None:
         self._message.setText(f"Could not read the model setup: {error}")
@@ -423,6 +486,30 @@ class ModelsPage(Page):
 
         self.jobs.run(work, done, self._fail)
 
+    def _lms_reload(self, name: str) -> None:
+        """Reload one LM Studio model at a window Hermes will accept."""
+        if self._reloading:
+            return
+        self._reloading = name
+        self._message.setText(
+            f"Reloading {name} in LM Studio at "
+            f"{providers.MIN_CONTEXT_WINDOW:,} tokens — a large model takes "
+            f"a moment…")
+        self.refresh()
+        self.jobs.run(lambda: providers.lms_reload(name),
+                      self._on_reloaded, self._on_reload_failed)
+
+    def _on_reloaded(self, outcome: tuple[bool, str]) -> None:
+        self._reloading = ""
+        ok, detail = outcome
+        self._message.setText(detail if ok else f"Reload failed: {detail}")
+        self.refresh()
+
+    def _on_reload_failed(self, error: str) -> None:
+        self._reloading = ""
+        self._message.setText(f"Reload failed: {error}")
+        self.refresh()
+
     def _use_local(self, server: providers.LocalServer,
                    model: providers.LocalModel) -> None:
         pairs = {
@@ -434,6 +521,11 @@ class ModelsPage(Page):
             pairs["model.api_key"] = "ollama"
             if model.context:
                 pairs["model.ollama_num_ctx"] = providers.suggested_num_ctx(model)
+        else:
+            # LM Studio ignores the value but the OpenAI client refuses to
+            # send a request without one, and whatever the last provider set
+            # would otherwise be left in place.
+            pairs["model.api_key"] = "lmstudio"
         self._set_keys(pairs)
 
     def _use_cloud(self, provider: providers.CloudProvider) -> None:

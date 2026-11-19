@@ -225,3 +225,83 @@ def test_an_unknown_window_still_clears_the_floor() -> None:
     )
     model = LocalModel(name="x", server="Ollama", context=0, size_bytes=0)
     assert suggested_num_ctx(model) >= MIN_CONTEXT_WINDOW
+
+
+# --- LM Studio: the loaded window, not the advertised one -------------------
+#
+# The failure this whole group exists for: LM Studio serves a model at a
+# context length chosen when it was loaded, which defaults far below what the
+# model supports. The server reports the model as present and healthy, Hermes
+# refuses every turn, and neither interface connects the two.
+
+def _lms(**kw) -> providers.LocalModel:
+    base = dict(name="google/gemma-4-e4b", server="LM Studio",
+                context=131_072, size_bytes=6_860_000_000,
+                capabilities=("tool_use",), loaded_context=65_536,
+                vision=True, loaded=True)
+    base.update(kw)
+    return providers.LocalModel(**base)
+
+
+def test_lmstudio_tool_capability_is_named_differently_to_ollama():
+    """Ollama says "tools"; LM Studio says "tool_use". Both mean yes."""
+    assert _lms().supports_tools is True
+    assert providers.LocalModel(name="x", server="Ollama", context=131_072,
+                                size_bytes=1, capabilities=("tools",)).supports_tools
+
+
+def test_loaded_window_overrides_the_advertised_one():
+    assert _lms().effective_context == 65_536
+    assert _lms(loaded_context=0).effective_context == 131_072
+
+
+def test_model_loaded_below_the_floor_is_refused_with_the_real_fix():
+    verdict = providers.context_verdict(_lms(loaded_context=8_192))
+    assert not verdict.ok
+    # The number that matters is the loaded one, and the remedy is a loading
+    # setting rather than a different model — saying otherwise sends the user
+    # off to download something they do not need.
+    assert "8,192" in verdict.headline
+    assert "reload" in verdict.detail.lower()
+
+
+def test_a_model_not_loaded_is_a_warning_not_a_refusal():
+    verdict = providers.context_verdict(_lms(loaded=False, loaded_context=0))
+    assert verdict.ok and verdict.state == "warn"
+    assert "not loaded" in verdict.headline.lower()
+
+
+def test_reload_without_the_cli_says_so_instead_of_raising(monkeypatch):
+    monkeypatch.setattr(providers, "lms_available", lambda: False)
+    ok, detail = providers.lms_reload("whatever")
+    assert not ok and "LM Studio" in detail
+
+
+def test_reload_unloads_first_then_loads_at_the_floor(monkeypatch):
+    """Two instances of a large model will not fit, and ``lms load`` on an
+    already-loaded model adds one rather than replacing it."""
+    calls: list[list[str]] = []
+
+    class Done:
+        returncode = 0
+        stdout = stderr = ""
+
+    monkeypatch.setattr(providers, "lms_available", lambda: True)
+    monkeypatch.setattr(providers.subprocess, "run",
+                        lambda cmd, **kw: calls.append(cmd) or Done())
+    ok, _ = providers.lms_reload("m", 65_536)
+    assert ok
+    assert calls[0][1:] == ["unload", "m"]
+    assert calls[1][1:] == ["load", "m", "-c", "65536", "--gpu", "max", "-y"]
+
+
+def test_reload_failure_reports_the_servers_own_words(monkeypatch):
+    class Failed:
+        returncode = 1
+        stdout = ""
+        stderr = "Error: model not found\n"
+
+    monkeypatch.setattr(providers, "lms_available", lambda: True)
+    monkeypatch.setattr(providers.subprocess, "run", lambda cmd, **kw: Failed())
+    ok, detail = providers.lms_reload("m")
+    assert not ok and "model not found" in detail

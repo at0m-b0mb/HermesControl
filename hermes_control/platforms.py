@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -315,6 +316,85 @@ def reveal(path: Path) -> None:
             subprocess.Popen(["xdg-open", str(path if path.is_dir() else path.parent)])
     except OSError:
         pass
+
+
+#: Terminals to try on Linux, commonest first. There is no portable way to
+#: ask for "a terminal", and the desktop-environment default is not readable
+#: without pulling in a dependency, so this is a list with a fallback.
+LINUX_TERMINALS = ("x-terminal-emulator", "gnome-terminal", "konsole",
+                   "xfce4-terminal", "alacritty", "kitty", "xterm")
+
+
+def open_shell(line: str) -> tuple[bool, str]:
+    """Run one shell command in a terminal the user can see and type into.
+
+    For setup flows that are a conversation rather than a command —
+    himalaya's account wizard asks for a provider, an address and a
+    password, and stores the password in the system keyring, which it
+    cannot do without a terminal to ask in.
+    """
+    try:
+        if IS_WINDOWS:
+            subprocess.Popen(
+                ["powershell", "-NoExit", "-Command", line],
+                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+            return True, "Opened PowerShell."
+        if IS_MAC:
+            subprocess.Popen([
+                "osascript", "-e",
+                f'tell application "Terminal" to do script {_applescript(line)}',
+                "-e", 'tell application "Terminal" to activate'])
+            return True, "Opened Terminal."
+        for term in LINUX_TERMINALS:
+            if shutil.which(term):
+                subprocess.Popen([term, "-e", "sh", "-c", f"{line}; exec sh"])
+                return True, f"Opened {term}."
+        return False, "No terminal found. Run the command below yourself."
+    except OSError as exc:
+        return False, str(exc)
+
+
+def open_terminal(install: Install, args: list[str]) -> tuple[bool, str]:
+    """Run a Hermes command in a terminal the user can see and type into.
+
+    Some of Hermes's setup flows are genuinely interactive — WhatsApp
+    pairing draws a QR code and waits for the phone to scan it, asking
+    questions along the way. Capturing that into a widget would mean
+    re-implementing a terminal badly, and a half-drawn QR code is worse
+    than none. So this hands the job to a real terminal, with HERMES_HOME
+    set, so the isolated install is still the one being configured.
+    """
+    quoted = " ".join(shlex.quote(a) for a in args)
+    try:
+        if IS_WINDOWS:
+            command = (f'$env:HERMES_HOME="{install.hermes_home}"; '
+                       f'& "{install.executable}" {quoted}')
+            subprocess.Popen(
+                ["powershell", "-NoExit", "-Command", command],
+                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+            return True, "Opened PowerShell."
+        line = (f'HERMES_HOME={shlex.quote(str(install.hermes_home))} '
+                f'{shlex.quote(str(install.executable))} {quoted}')
+        if IS_MAC:
+            subprocess.Popen([
+                "osascript", "-e",
+                f'tell application "Terminal" to do script {_applescript(line)}',
+                "-e", 'tell application "Terminal" to activate'])
+            return True, "Opened Terminal."
+        for term in LINUX_TERMINALS:
+            if shutil.which(term):
+                subprocess.Popen([term, "-e", "sh", "-c", f"{line}; exec sh"])
+                return True, f"Opened {term}."
+        return False, ("No terminal found. Run the command below in your "
+                       "own shell.")
+    except OSError as exc:
+        return False, str(exc)
+
+
+def _applescript(text: str) -> str:
+    """Quote a string for AppleScript, where only " and \\ are special."""
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 def terminal_hint(install: Install) -> str:

@@ -18,6 +18,7 @@ Control takes its own backup before any batch of writes regardless.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -27,7 +28,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from hermes_control import providers  # noqa: E402
+from hermes_control import channels, providers  # noqa: E402
 from hermes_control.cli import Hermes  # noqa: E402
 
 HERMES = Hermes()
@@ -511,3 +512,48 @@ def test_the_ribbon_says_something_useful_before_the_first_turn() -> None:
     assert ribbon._window == 131_072
     ribbon.set_budget(65_536, 131_072)
     assert ribbon.fraction == 0.5
+
+
+@needs_hermes
+def test_the_gateway_page_judges_channels_by_asking_the_gateway(app) -> None:
+    """Not by reading .env. The whole point of the rewrite is that a token
+    being present proves nothing about whether a channel works."""
+    application, shell = app
+    page = shell.page("Gateway")
+    shell.show_page("Gateway")
+    settle(application, 60.0, until=lambda: page._channel_box.count() > 0)
+    assert page._channel_box.count() == len(channels.CHANNELS), \
+        "every channel should get a row, connected or not"
+    # With nothing connected there is nothing to test-send to, and offering
+    # the button anyway would produce a failure that teaches nothing.
+    if page._target.count() == 0:
+        assert not page._send_button.isEnabled()
+
+
+@needs_hermes
+def test_installed_skills_are_counted_through_the_category_folders(app) -> None:
+    """The tree is skills/<category>/<skill>/SKILL.md. Reading one level
+    deep reports the dozen category folders as nameless skills and loses
+    every real one."""
+    application, shell = app
+    page = shell.page("Skills")
+    shell.show_page("Skills")
+    settle(application, 30.0, until=lambda: page._list_box.count() > 0)
+    found = shell.hermes.skills()
+    on_disk = len(list(shell.hermes.skills_dir.rglob("SKILL.md")))
+    assert found, "no skills were read at all"
+    assert len(found) == on_disk, (
+        f"read {len(found)} skills but {on_disk} SKILL.md files exist")
+    assert all(s["name"] for s in found)
+
+
+@needs_hermes
+def test_a_skill_missing_its_command_is_reported_as_unusable(app) -> None:
+    """It installs cleanly, lists normally, and fails the first time the
+    agent reaches for it. Nothing else in either interface says so."""
+    application, shell = app
+    found = shell.hermes.skills()
+    for skill in found:
+        for command in skill.get("missing", []):
+            assert shutil.which(command) is None, (
+                f"{skill['name']} reports {command} missing but it is on PATH")

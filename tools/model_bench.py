@@ -63,6 +63,8 @@ BUDGET = 300.0
 @dataclass
 class Score:
     model: str
+    server: str = ""
+    vision: bool = False
     window: int = 0
     tools: bool | None = None
     eligible: bool = False
@@ -84,7 +86,8 @@ class Score:
 
 
 def bench(hermes: Hermes, model: providers.LocalModel) -> Score:
-    score = Score(model=model.name, window=model.context,
+    score = Score(model=model.name, server=model.server,
+                  vision=model.vision, window=model.effective_context,
                   tools=model.supports_tools, calls=[])
 
     verdict = providers.context_verdict(model, providers.suggested_num_ctx(model))
@@ -126,31 +129,37 @@ def main(argv: list[str]) -> int:
     if not hermes.installed:
         print("Hermes Agent is not installed.")
         return 1
-    server = providers.probe_ollama()
-    if not server.reachable:
-        print(f"Ollama is not reachable: {server.error}")
+    # Both servers, not just Ollama. Benching only one of them silently
+    # skipped every model the user actually had loaded.
+    servers = [s for s in providers.probe_local() if s.reachable]
+    if not servers:
+        print("No local server is reachable (tried Ollama and LM Studio).")
         return 1
+    print("Reachable: " + ", ".join(f"{s.name} ({len(s.models)})" for s in servers))
 
     wanted = [a.lower() for a in argv[1:]]
-    models = [m for m in server.models
+    models = [m for s in servers for m in s.models
               if not wanted or any(w in m.name.lower() for w in wanted)]
     if not models:
         print("No matching models.")
         return 1
 
-    print(f"{'model':<30} {'window':>9} {'tools':>6} {'time':>7}  verdict")
-    print("-" * 78)
+    print(f"{'model':<30} {'server':<10} {'window':>9} {'tools':>6} {'img':>4} "
+          f"{'time':>7}  verdict")
+    print("-" * 96)
     scores = []
     for model in models:
         score = bench(hermes, model)
         scores.append(score)
         tools = {True: "yes", False: "NO", None: "?"}[score.tools]
         secs = f"{score.seconds:.0f}s" if score.eligible else "-"
+        img = "yes" if score.vision else "-"
         detail = score.reason or score.note or ""
         if score.eligible and score.calls:
             detail = f"{detail} [{', '.join(score.calls[:4])}]".strip()
-        print(f"{score.model:<30} {score.window:>9,} {tools:>6} {secs:>7}  "
-              f"{score.verdict:<10} {detail}"[:140], flush=True)
+        print(f"{score.model:<30} {score.server:<10} {score.window:>9,} "
+              f"{tools:>6} {img:>4} {secs:>7}  {score.verdict:<10} "
+              f"{detail}"[:150], flush=True)
         if score.first_error:
             print(f"{'':>56}why: {score.first_error}"[:140], flush=True)
 

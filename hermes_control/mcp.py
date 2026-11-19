@@ -126,10 +126,14 @@ class Mcp:
 #: there no email connector" has a real answer, and it is not in either
 #: catalogue.
 WHERE_THINGS_LIVE = (
-    ("Email", "Hermes's own IMAP/SMTP gateway — the Gateway page, not a "
-              "connector. Neither catalogue ships an email integration."),
+    ("Email, inbound", "People write to the agent and it replies: Hermes's "
+                       "own IMAP/SMTP gateway — the Gateway page."),
+    ("Email, outbound", "The agent reads and sends from *your* mailbox: a "
+                        "skill — the Skills page. Not a connector, and not "
+                        "in this catalogue, which is where everyone looks "
+                        "first and finds nothing."),
     ("Messaging", "Gateway platforms: Telegram, Discord, Slack, WhatsApp, "
-                  "Signal. Also the Gateway page."),
+                  "Teams, Google Chat. Also the Gateway page."),
     # No counts here. They drift the moment either catalogue changes, and a
     # stale number in a card that exists to orient people is worse than none;
     # each page shows its own live count in the header.
@@ -138,5 +142,6 @@ WHERE_THINGS_LIVE = (
     ("New tools", "MCP servers — this page. The catalogue is Nous-approved, "
                   "and `add` takes any server beyond it."),
     ("Procedures", "Skills: markdown the agent can load, including ones it "
-                   "writes itself."),
+                   "writes itself. `skills search` reaches far more than "
+                   "ship with an install."),
 )

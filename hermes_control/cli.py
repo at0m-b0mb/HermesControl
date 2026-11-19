@@ -28,6 +28,7 @@ import json
 import os
 import re
 import sqlite3
+import shutil
 import subprocess
 import threading
 import time
@@ -416,37 +417,70 @@ class Hermes:
     def skills(self) -> list[dict[str, Any]]:
         """Installed skills, read from the skills directory.
 
-        Each skill is a folder with a ``SKILL.md`` whose YAML front matter
-        carries its name and description.
+        The tree is two levels deep: ``skills/<category>/<skill>/SKILL.md``.
+        Reading only the top level — which is the obvious thing to do and
+        what this did at first — lists the twelve category folders as if
+        they were skills, every one of them nameless and undescribed,
+        while fifty-eight real skills go unreported. Both depths are
+        walked, because a hub install can land at either.
+
+        Prerequisites are checked, not just read. A skill whose command is
+        missing installs cleanly, appears in every listing, and then fails
+        the first time the agent reaches for it — ``himalaya`` ships with
+        Hermes and needs a binary that does not, which is exactly the
+        silent gap worth surfacing before it bites.
         """
         found: list[dict[str, Any]] = []
         if not self.skills_dir.is_dir():
             return found
+
+        def read(folder: Path, category: str = "") -> dict[str, Any] | None:
+            card = folder / "SKILL.md"
+            if not card.exists():
+                return None
+            meta: dict[str, Any] = {
+                "name": folder.name, "path": str(folder), "description": "",
+                "source": "", "category": category, "missing": []}
+            try:
+                text = card.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                text = ""
+            if text.startswith("---"):
+                _, _, rest = text.partition("---")
+                front, _, _ = rest.partition("---")
+                try:
+                    data = yaml.safe_load(front) or {}
+                except yaml.YAMLError:
+                    data = {}
+                if isinstance(data, dict):
+                    meta["description"] = str(data.get("description", ""))[:400]
+                    meta["name"] = str(data.get("name", folder.name))
+                    needs = data.get("prerequisites") or {}
+                    commands = (needs.get("commands")
+                                if isinstance(needs, dict) else None) or []
+                    meta["missing"] = [
+                        str(c) for c in commands
+                        if isinstance(c, str) and not shutil.which(c)]
+            try:
+                meta["size"] = sum(f.stat().st_size
+                                   for f in folder.rglob("*") if f.is_file())
+            except OSError:
+                meta["size"] = 0
+            return meta
+
         for entry in sorted(self.skills_dir.iterdir()):
             if not entry.is_dir() or entry.name.startswith("."):
                 continue
-            card = entry / "SKILL.md"
-            meta: dict[str, Any] = {"name": entry.name, "path": str(entry),
-                                    "description": "", "source": ""}
-            if card.exists():
-                try:
-                    text = card.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    text = ""
-                if text.startswith("---"):
-                    _, _, rest = text.partition("---")
-                    front, _, _ = rest.partition("---")
-                    try:
-                        data = yaml.safe_load(front) or {}
-                    except yaml.YAMLError:
-                        data = {}
-                    if isinstance(data, dict):
-                        meta["description"] = str(data.get("description", ""))[:400]
-                        meta["name"] = str(data.get("name", entry.name))
-                meta["size"] = sum(
-                    f.stat().st_size for f in entry.rglob("*") if f.is_file()
-                )
-            found.append(meta)
+            direct = read(entry)
+            if direct is not None:
+                found.append(direct)
+                continue
+            for child in sorted(entry.iterdir()):
+                if not child.is_dir() or child.name.startswith("."):
+                    continue
+                nested = read(child, entry.name)
+                if nested is not None:
+                    found.append(nested)
         return found
 
     def cron_jobs(self) -> list[dict[str, Any]]:
@@ -587,6 +621,72 @@ class Hermes:
         if "not running" in text or "stopped" in text:
             return False
         return "running" in text
+
+    def skills_search(self, query: str, source: str = "all",
+                      limit: int = 30,
+                      timeout: float = 90.0) -> tuple[bool, str]:
+        """Search every skill registry Hermes knows.
+
+        ``--json`` matters beyond convenience: the table truncates each
+        identifier to the column width, and the identifier is exactly what
+        ``skills install`` needs, so the human-readable form cannot be
+        used to install anything.
+        """
+        args = ["skills", "search", query, "--limit", str(limit), "--json"]
+        if source and source != "all":
+            args += ["--source", source]
+        result = self.run(args, timeout=timeout)
+        if result.returncode != 0:
+            return False, (result.stderr or result.stdout or
+                           f"skills search exited {result.returncode}")
+        return True, result.stdout
+
+    def skills_inspect(self, identifier: str,
+                       timeout: float = 90.0) -> Result:
+        """Read a skill without installing it.
+
+        These are procedures the agent will follow, and some carry scripts
+        it will run, so looking first is the point rather than a nicety.
+        """
+        return self.run(["skills", "inspect", identifier], timeout=timeout)
+
+    def skills_install(self, identifier: str,
+                       timeout: float = 300.0) -> Result:
+        """Install one skill.
+
+        ``--yes`` is required, not optional: without it Hermes asks for
+        confirmation on a terminal this process does not have, and the
+        install dies waiting for an answer that can never arrive. Hermes
+        still runs its own safety scan and still refuses a skill it judges
+        dangerous — ``--yes`` answers the prompt, not the verdict.
+        """
+        return self.run(["skills", "install", identifier, "--yes"],
+                        timeout=timeout)
+
+    def channel_targets(self, timeout: float = 45.0) -> tuple[bool, str]:
+        """Ask the gateway which messaging targets it can actually reach.
+
+        ``hermes send --list --json`` is the one place that answers from the
+        credentials the gateway really loaded, rather than from what is
+        written in ``.env``. An empty mapping is a real answer — nothing is
+        connected — so success is judged on the exit code, not on the
+        listing being non-empty.
+        """
+        result = self.run(["send", "--list", "--json"], timeout=timeout)
+        if result.returncode != 0:
+            return False, (result.stderr or result.stdout or
+                           f"hermes send --list exited {result.returncode}")
+        return True, result.stdout
+
+    def send_test(self, target: str, message: str,
+                  timeout: float = 60.0) -> Result:
+        """Deliver one message to a configured platform.
+
+        No model and no agent loop — this is the gateway's own delivery
+        path, so a message that arrives proves the channel, and nothing
+        else is being tested along with it.
+        """
+        return self.run(["send", "--to", target, message], timeout=timeout)
 
     def serve_status(self) -> Result:
         return self.run(["dashboard", "--status"], timeout=45)

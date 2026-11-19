@@ -48,7 +48,7 @@ class McpPage(Page):
         header.add_action(w.button("Rescan", "", self.refresh))
         layout.addWidget(header)
 
-        # The orientation card. Four extension surfaces is three too many to
+        # The orientation card. Five extension surfaces is four too many to
         # keep straight, and "where is email" is the question everyone asks.
         guide = w.Card("Where capabilities come from", accent=True)
         table = w.KeyValue()
