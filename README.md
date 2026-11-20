@@ -77,6 +77,16 @@ So attachments travel the way that works in both cases: the file is named by **a
 
 Absolute paths, always. The agent's working directory is not yours and not this app's — a bare filename resolves somewhere nobody intended, which is exactly how a `SOUL.md` edit once landed in a home directory instead of the Hermes install.
 
+### "Done — I've saved that"
+
+The failure a transcript cannot show you. A model is asked to remember something and answers *"I've made a note of that."* Sometimes the tool ran. Sometimes no tool ran at all and the sentence is the whole of it. **The two are identical on screen**, and the second is the commonest way a small local model looks like it is working.
+
+Hermes reports every tool call, so the app can tell them apart. When the answer claims an action that needs a tool and no tool of that kind succeeded, the transcript says so:
+
+> **NOTHING ACTUALLY HAPPENED** — It said "I've noted" but called no tool that would remember. Nothing was written to memory.
+
+Deliberately conservative. A false alarm trains people to ignore the warning, so a claim is flagged only when it is confident and specific, never when a plausible tool ran, and never for an offer (*"I can remember that if you like"*) or an admission of failure.
+
 ### The ribbon
 
 The meter on the Console is the one thing here no other tool could show, because it is made of Hermes's own mechanic. Hermes does not truncate a long conversation — past `compression.threshold` of the window it rewrites the middle into a summary and continues. The ribbon draws the window, the live token count, the threshold where that happens, and the target it compacts down to. You can see a rewrite coming instead of discovering it afterwards.
@@ -248,7 +258,7 @@ On macOS 26 (Darwin 27), Python 3.13, PySide6 6.12 / Qt 6.12, against Hermes Age
 
 - Isolated install into `~/.hermes-agent`, leaving an unrelated `~/.hermes` byte-identical by SHA-256.
 - All 11 pages render in both themes with no exceptions (`tools/shoot.py`).
-- **336 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
+- **350 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
 - A chat turn end to end *through the interface*: typed into the Console, streamed back, answer in the transcript, token accounting delivered to the ribbon.
 - Editing a setting and pressing Apply is asserted to reach `config.yaml`, and the original is restored.
 - Every local model's verdict is checked against what Ollama actually reports, and a model under the floor is asserted to be unselectable.

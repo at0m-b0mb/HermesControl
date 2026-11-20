@@ -226,3 +226,117 @@ def test_an_image_mentions_vision_and_not_read_file(tmp_path):
     prompt = attachments.compose("look", attachments.collect([img]))
     assert "vision_analyze" in prompt
     assert "read_file" not in prompt
+
+
+# --- claims -----------------------------------------------------------------
+#
+# The failure a transcript cannot show you: "Done, I've saved that" is
+# identical on screen whether or not a tool ran.
+
+from hermes_control import claims  # noqa: E402
+
+
+def test_a_claim_with_no_tool_is_flagged():
+    found = claims.unbacked("Understood. I have made a note of that.", [])
+    assert [c.kind for c in found] == ["remember"]
+    assert "memory" in claims.summarise(found).lower()
+
+
+def test_the_same_claim_with_the_tool_is_silent():
+    assert not claims.unbacked("Understood. I have made a note of that.",
+                               [("memory", False)])
+
+
+def test_a_failed_tool_does_not_back_the_claim():
+    """The tool ran and errored, so the sentence is still untrue."""
+    assert claims.unbacked("I have written the file.",
+                           [("write_file", True)])
+
+
+def test_an_offer_is_not_a_claim():
+    for hedge in ("I can remember that for you if you like.",
+                  "Shall I set a reminder?",
+                  "I was unable to set the reminder.",
+                  "I cannot schedule that."):
+        assert not claims.unbacked(hedge, []), hedge
+
+
+def test_a_hedge_elsewhere_does_not_excuse_a_claim():
+    """Only the sentence the phrase sits in decides it."""
+    text = ("I have saved that to memory. Separately, I cannot send email.")
+    assert claims.unbacked(text, [])
+
+
+def test_scheduling_and_writing_are_told_apart():
+    assert [c.kind for c in claims.unbacked("Reminder set for 2pm.", [])] \
+        == ["schedule"]
+    assert [c.kind for c in claims.unbacked("I've created the file.", [])] \
+        == ["write a file"]
+
+
+def test_a_tool_whose_name_merely_contains_the_word_counts():
+    """Hermes names its memory tool differently across versions."""
+    assert not claims.unbacked("I have saved that to memory.",
+                               [("memory_manage", False)])
+
+
+def test_nothing_is_claimed_about_an_empty_answer():
+    assert not claims.unbacked("", [])
+    assert claims.summarise([]) == ""
+
+
+# --- tool results -----------------------------------------------------------
+
+import json as _json  # noqa: E402
+
+from hermes_control import transcript  # noqa: E402
+
+
+def test_a_result_is_summarised_not_cut():
+    """Creating one cron job returns ~900 characters, most of it nulls.
+    Truncating at a length keeps the nulls and loses the job id."""
+    payload = _json.dumps({
+        "success": True, "job_id": "48055cb344c0", "name": "Stand up.",
+        "skill": None, "skills": [], "schedule": "once in 3 minutes",
+        "deliver": "origin", "last_delivery_error": None,
+        "job": {"job_id": "x", "last_status": None}})
+    text, shortened = transcript.summarise_result(payload)
+    assert shortened
+    assert "48055cb344c0" in text and "once in 3 minutes" in text
+    assert "last_delivery_error" not in text
+    assert "null" not in text
+
+
+def test_a_failure_leads_with_the_error():
+    """A failed call that reads like a successful one is the most
+    misleading thing a transcript can show."""
+    text, _ = transcript.summarise_result(
+        '{"success": false, "error": "Missing required target."}')
+    assert text.startswith("error:")
+    assert "Missing required target" in text
+
+
+def test_a_reads_content_survives_the_summary():
+    """For a read, the file's text *is* the result; reporting its line
+    count while dropping what it says summarises away the answer."""
+    text, _ = transcript.summarise_result(_json.dumps(
+        {"content": "1|alpha\n2|beta", "total_lines": 2, "truncated": False}))
+    assert "alpha" in text and "beta" in text
+
+
+def test_a_summary_is_one_line():
+    text, _ = transcript.summarise_result(_json.dumps(
+        {"content": "a\nb\nc\nd", "total_lines": 4}))
+    assert "\n" not in text
+
+
+def test_plain_text_passes_through_and_long_text_is_cut():
+    assert transcript.summarise_result("short") == ("short", False)
+    long_text, shortened = transcript.summarise_result("x" * 900)
+    assert shortened and len(long_text) < 900
+
+
+def test_empty_and_malformed_results_do_not_raise():
+    assert transcript.summarise_result("")[0] == "(no output)"
+    assert transcript.summarise_result("{not json")[0] == "{not json"
+    assert transcript.summarise_result(None)[0] == "(no output)"

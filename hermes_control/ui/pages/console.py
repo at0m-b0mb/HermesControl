@@ -27,7 +27,8 @@ from PySide6.QtWidgets import (
     QTextEdit, QVBoxLayout, QWidget,
 )
 
-from ... import attachments, briefing, providers, theme, toolsets
+from ... import (attachments, briefing, claims, providers, theme,
+                 toolsets, transcript)
 from ...cli import ChatStream, Event
 from .. import widgets as w
 from ..shell import Page
@@ -90,6 +91,8 @@ class ConsolePage(Page):
         self._pending = ""
         self._session = ""
         self._attachments: list[attachments.Attachment] = []
+        self._answer = ""
+        self._calls: list[list] = []
         self._window = 0
         self._tool_depth = 0
         self._ready = False
@@ -402,18 +405,52 @@ class ConsolePage(Page):
 
     def _append(self, body: str, token: str = "ink", *,
                 mono: bool = True, label: str = "") -> None:
+        """Add one block to the transcript.
+
+        Three kinds of thing end up here and they are not equals: what
+        you said, what the agent answered, and the machinery in between.
+        The answer is the thing being read, so it gets proportional type
+        at a readable size; your own words are set apart by a rule rather
+        than a bubble, which survives being copied out; and tool traffic
+        is deliberately quieter and indented, present for checking rather
+        than for reading.
+        """
         self._clear_empty_state()
         mode = self.app.mode
         colour = theme.color(token, mode)
         faint = theme.color("ink_faint", mode)
-        family = theme.mono() if mono else theme.sans()
-        head = (f'<div style="color:{faint};font-family:{theme.sans()};'
-                f'font-size:10px;letter-spacing:1.2px;margin-top:10px">'
-                f'{html.escape(label.upper())}</div>' if label else "")
+        rule = theme.color("rule", mode)
+        brass = theme.color("brass", mode)
+        kind = (label or "").split("\u00b7")[0].strip().lower()
         text = html.escape(body).replace("\n", "<br>")
-        self._transcript.append(
-            f'{head}<div style="color:{colour};font-family:{family};'
-            f'white-space:pre-wrap">{text}</div>')
+
+        if kind == "you":
+            self._transcript.append(
+                f'<div style="margin-top:20px;border-left:2px solid {brass};'
+                f'padding-left:12px">'
+                f'<div style="color:{faint};font-family:{theme.sans()};'
+                f'font-size:10px;letter-spacing:1.2px">YOU</div>'
+                f'<div style="color:{colour};font-family:{theme.sans()};'
+                f'font-size:14px;white-space:pre-wrap">{text}</div></div>')
+        elif kind == "hermes":
+            self._transcript.append(
+                f'<div style="margin-top:14px">'
+                f'<div style="color:{colour};font-family:{theme.sans()};'
+                f'font-size:14px;line-height:160%;white-space:pre-wrap">'
+                f'{text}</div></div>')
+        else:
+            # Tools, results, errors and warnings: the working, indented
+            # under the answer it belongs to and set in mono because it is
+            # machine output and alignment carries meaning.
+            family = theme.mono() if mono else theme.sans()
+            head = (f'<div style="color:{faint};font-family:{theme.sans()};'
+                    f'font-size:9px;letter-spacing:1.2px">'
+                    f'{html.escape(label.upper())}</div>' if label else "")
+            self._transcript.append(
+                f'<div style="margin-top:8px;margin-left:14px;'
+                f'border-left:1px solid {rule};padding-left:10px">{head}'
+                f'<div style="color:{colour};font-family:{family};'
+                f'font-size:12px;white-space:pre-wrap">{text}</div></div>')
         bar = self._transcript.verticalScrollBar()
         bar.setValue(bar.maximum())
 
@@ -552,6 +589,8 @@ class ConsolePage(Page):
         self._append(shown, "ink", mono=False, label="you")
         self._clear_attachments()
         self._pending = ""
+        self._answer = ""
+        self._calls = []
         self._tool_depth = 0
 
         choice = toolsets.choice_for(self._toolsets.currentText())
@@ -607,6 +646,7 @@ class ConsolePage(Page):
             return
 
         if kind == "text":
+            self._answer += event.text
             self._pending += event.text
             self._state.setText(f"Answering… {len(self._pending)} characters")
             return
@@ -619,17 +659,22 @@ class ConsolePage(Page):
             # says the agent did something; "read_file path=notes.txt" says
             # what, which is the difference between watching a turn and
             # being able to check it.
+            self._calls.append([name, False])
             self._append(f"{name}  {_arguments(event.raw.get('input'))}",
                          "brass", label="tool")
             self._activity.setText(f"\u25b8 {name} {_arguments(event.raw.get('input'))}"[:120])
             return
 
         if kind == "tool_result":
-            body = str(event.output)
-            if len(body) > 700:
-                body = body[:700] + f"\n\u2026 {len(body) - 700} more characters"
+            # Summarised, not truncated: the fields that say what happened
+            # are rarely in the first two hundred characters, so cutting at
+            # a length throws away the part worth reading and leaves the
+            # nulls.
+            body, _ = transcript.summarise_result(event.output)
             took = event.raw.get("duration_ms")
             failed = bool(event.raw.get("is_error"))
+            if self._calls:
+                self._calls[-1][1] = failed
             tag = "result"
             if took:
                 tag = f"result · {int(took)} ms"
@@ -652,6 +697,15 @@ class ConsolePage(Page):
                                        self._threshold, self._target)
             if event.error:
                 self._append(str(event.error), "fault", mono=False, label="error")
+            # "Done, I've saved that" with no tool call is indistinguishable
+            # from the real thing in a transcript, and is how a small local
+            # model most often looks like it is working.
+            unbacked = claims.unbacked(
+                event.raw.get("text") or self._answer,
+                [(n, f) for n, f in self._calls])
+            if unbacked:
+                self._append(claims.summarise(unbacked), "attention",
+                             mono=False, label="nothing actually happened")
             bits = []
             if total:
                 bits.append(f"{total:,} tokens")

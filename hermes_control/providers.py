@@ -234,6 +234,47 @@ def lms_available() -> bool:
 RELOAD_CONTEXT = MIN_CONTEXT_WINDOW
 
 
+def lms_server_start(timeout: int = 90) -> tuple[bool, str]:
+    """Start LM Studio's local server.
+
+    Worth having a button for because the server stops more often than
+    anything else here: quitting the app stops it, and it does not come
+    back when the app is reopened. Until now the Models page could only
+    report "nothing answering on this port" and leave the user to find
+    the CLI — a diagnosis without the one-line fix beside it.
+
+    Starting the server does not load a model; that is a separate step,
+    which is why the caller usually follows with :func:`lms_reload`.
+    """
+    if not lms_available():
+        return False, (f"LM Studio's CLI is not at {LMS_CLI}. Open LM "
+                       f"Studio once to install it, then start its server "
+                       f"from the app's Developer tab.")
+    try:
+        done = subprocess.run([str(LMS_CLI), "server", "start"],
+                              capture_output=True, text=True,
+                              timeout=timeout, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, str(exc)
+    if done.returncode != 0:
+        detail = (done.stderr or done.stdout or "").strip().splitlines()
+        return False, (detail[-1] if detail else
+                       f"lms server start exited {done.returncode}.")
+    # Confirm rather than trust: the command can succeed while the port
+    # is still coming up, and a page that says "started" over a server
+    # that is not answering yet is the same lie as before.
+    server = probe_lmstudio()
+    if not server.reachable:
+        return False, ("The server reported that it started, but nothing "
+                       "is answering on the port yet. Rescan in a moment.")
+    loaded = [m for m in server.models if m.loaded]
+    return True, ("LM Studio is answering. "
+                  + (f"{loaded[0].name} is loaded at "
+                     f"{loaded[0].effective_context:,} tokens."
+                     if loaded else
+                     "No model is loaded yet — use a model below."))
+
+
 def lms_reload(model: str, context: int = RELOAD_CONTEXT,
                timeout: int = 300) -> tuple[bool, str]:
     """Reload a model in LM Studio at a context length Hermes will accept.

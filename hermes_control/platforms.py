@@ -172,6 +172,22 @@ def environment(hermes_home: Path) -> dict[str, str]:
     env["NO_COLOR"] = "1"
     env["TERM"] = "dumb"
     env["PYTHONIOENCODING"] = "utf-8"
+    # Register the tools that are gated on someone being present.
+    #
+    # ``cronjob_manage`` — the only way an agent can schedule anything —
+    # is registered only when one of HERMES_INTERACTIVE,
+    # HERMES_GATEWAY_SESSION, HERMES_EXEC_ASK or a cron session marker is
+    # set (``check_cronjob_requirements``). Without one, asking the agent
+    # for a reminder does not fail: the tool is simply absent, so the
+    # model says it cannot schedule things, which reads as a limitation
+    # of the model rather than of the environment it was handed.
+    #
+    # Hermes's own ``hermes chat -q`` exports exactly this, and its
+    # approval code expects it to appear without a human attached:
+    # single-query turns resolve approvals from ``approvals.*_mode``
+    # rather than parking on a prompt nobody can answer. So this grants
+    # the tool without arming a dialog that would hang.
+    env.setdefault("HERMES_INTERACTIVE", "1")
     return env
 
 

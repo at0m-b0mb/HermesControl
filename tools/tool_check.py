@@ -43,10 +43,6 @@ class Check:
     expect: tuple[str, ...] = ()
 
 
-def _reads(d: Path) -> bool:
-    return True  # scored on the answer, checked by the caller
-
-
 CHECKS: list[Check] = [
     Check(
         "write",
@@ -59,7 +55,7 @@ CHECKS: list[Check] = [
         "read",
         "Read colour.txt and reply with only the word it contains.",
         seed={"colour.txt": "VERMILION\n"},
-        verify=lambda d, answer="": "vermilion" in answer.lower(),
+        verify=lambda d, answer="": "vermilion" in answer.lower(),  # noqa: ARG005
         expect=("read_file",)),
     Check(
         "edit",
@@ -92,6 +88,13 @@ CHECKS: list[Check] = [
 
 
 def run(check: Check, hermes: Hermes, timeout: float = 300.0) -> dict:
+    """Run one check in a throwaway directory.
+
+    ``timeout`` is enforced here rather than passed to Hermes: a chat is
+    a stream, not a call that returns, so the bound has to be applied to
+    the loop that reads it. Without this a model that stalls mid-turn
+    hangs the whole run with nothing to say about why.
+    """
     with TemporaryDirectory(prefix=f"toolcheck-{check.name}-") as tmp:
         d = Path(tmp)
         for name, body in check.seed.items():
@@ -101,7 +104,12 @@ def run(check: Check, hermes: Hermes, timeout: float = 300.0) -> dict:
         answer = ""
         error = ""
         stream = hermes.chat(check.prompt, cwd=d)
+        timed_out = False
         for event in stream.events():
+            if time.monotonic() - started > timeout:
+                timed_out = True
+                stream.cancel()
+                break
             if event.type == "tool_use":
                 calls.append(event.tool)
             elif event.type == "text":
@@ -116,6 +124,9 @@ def run(check: Check, hermes: Hermes, timeout: float = 300.0) -> dict:
                 else verify(d))
         except Exception as exc:                       # noqa: BLE001
             passed, error = False, f"{type(exc).__name__}: {exc}"
+        if timed_out:
+            passed = False
+            error = f"gave up after {timeout:.0f}s"
         return {"name": check.name, "passed": passed, "calls": calls,
                 "seconds": took, "error": error,
                 "answer": answer.strip()[:80]}

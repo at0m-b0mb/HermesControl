@@ -46,6 +46,7 @@ class ModelsPage(Page):
         self._reloading = ""
         self._signing_in = ""
         self._sign_in_text = ""
+        self._starting = False
         self._pull_layers: set[str] = set()
 
         body = QWidget()
@@ -226,12 +227,23 @@ class ModelsPage(Page):
         # --- local servers -------------------------------------------------
         self._clear(self._local_box)
         for server in self._servers:
+            # A server that is down is the commonest reason this page
+            # looks broken, and LM Studio's stops whenever its app is
+            # quit. Saying "nothing is answering" and leaving the user to
+            # find the CLI is a diagnosis without the fix beside it.
+            start = None
+            if (not server.reachable and not server.is_ollama
+                    and providers.lms_available()):
+                start = w.button("Start server", "Primary",
+                                 self._start_lmstudio)
+                start.setEnabled(not self._starting)
+                start.setFixedWidth(126)
             head = w.row(
                 w.label(server.name, "body_bold"),
                 w.Badge("REACHABLE" if server.reachable else "NOT RUNNING",
                         "live" if server.reachable else "idle"),
                 w.label(server.base_url, "MonoFaint"),
-                w.spacer(), stretch_last=False)
+                w.spacer(), start, stretch_last=False)
             for child in head.findChildren(w.Badge):
                 child.apply_mode(mode)
             self._local_box.addWidget(head)
@@ -553,6 +565,47 @@ class ModelsPage(Page):
             self.refresh()
 
         self.jobs.run(work, done, self._fail)
+
+    def _start_lmstudio(self) -> None:
+        """Start LM Studio's server, then load a model into it.
+
+        Two steps because they are two things: the server can be up with
+        nothing loaded, which answers the port and serves no model —
+        exactly the state that reads as "working" and refuses every turn.
+        """
+        if self._starting:
+            return
+        self._starting = True
+        self._message.setText("Starting LM Studio's server\u2026")
+        self.refresh()
+
+        def work():
+            ok, detail = providers.lms_server_start()
+            if not ok:
+                return ok, detail
+            server = providers.probe_lmstudio()
+            if any(m.loaded for m in server.models):
+                return ok, detail
+            # Nothing loaded: bring up whichever model is configured, or
+            # the first one the server knows about.
+            wanted = str(self.hermes.config_value("model.default") or "")
+            names = [m.name for m in server.models]
+            choice = wanted if wanted in names else (names[0] if names else "")
+            if not choice:
+                return False, ("The server is up but knows of no models. "
+                               "Download one in LM Studio first.")
+            loaded_ok, loaded_detail = providers.lms_reload(choice)
+            return loaded_ok, f"{detail} {loaded_detail}"
+
+        def done(outcome):
+            self._starting = False
+            ok, detail = outcome
+            self._message.setText(detail)
+            self.refresh()
+
+        self.jobs.run(work, done,
+                      lambda e: (setattr(self, "_starting", False),
+                                 self._message.setText(e), self.refresh()))
 
     def _lms_reload(self, name: str) -> None:
         """Reload one LM Studio model at a window Hermes will accept."""
