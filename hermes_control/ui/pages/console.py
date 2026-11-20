@@ -306,6 +306,14 @@ class ConsolePage(Page):
                     if model.name == model_name and model.loaded:
                         served = model.effective_context
                         served_by = server.name
+        # The server can be up, answering, and holding a different model
+        # than the one Hermes will ask for. That turn fails as "malformed
+        # request", which points nowhere near the cause.
+        mismatch = ""
+        if providers.is_local(provider_key):
+            for server in providers.probe_local():
+                if server.reachable and not server.is_ollama:
+                    mismatch = providers.serving_mismatch(server, model_name)
         skills = hermes.skills()
         prompt_ok, prompt_text = hermes.prompt_size()
         return {
@@ -314,6 +322,7 @@ class ConsolePage(Page):
             "provider": provider_key,
             "window": served or window,
             "served_by": served_by,
+            "mismatch": mismatch,
             "threshold": compression.get("threshold", 0.5),
             "target": compression.get("target_ratio", 0.2),
             "briefing": briefing.build(
@@ -369,6 +378,11 @@ class ConsolePage(Page):
             if not self._transcript.toPlainText():
                 self._state.setText("")
 
+        warning = str(data.get("mismatch") or "")
+        if warning:
+            self._activity.setText("\u26a0 " + warning[:160])
+        elif self._stream is None:
+            self._activity.setText("")
         self._show_workdir()
         if getattr(self, "_empty", False) or not self._transcript.toPlainText().strip():
             self._show_empty_state()

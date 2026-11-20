@@ -340,3 +340,50 @@ def test_empty_and_malformed_results_do_not_raise():
     assert transcript.summarise_result("")[0] == "(no output)"
     assert transcript.summarise_result("{not json")[0] == "{not json"
     assert transcript.summarise_result(None)[0] == "(no output)"
+
+
+# --- serving mismatch -------------------------------------------------------
+
+from hermes_control import providers as _p  # noqa: E402
+
+
+def _lmstudio(*loaded: tuple[str, int]) -> _p.LocalServer:
+    server = _p.LocalServer("LM Studio", "lmstudio", "http://x/v1")
+    server.reachable = True
+    server.models = [
+        _p.LocalModel(name=n, server="LM Studio", context=w, size_bytes=1,
+                      capabilities=("tool_use",), loaded_context=w,
+                      loaded=True)
+        for n, w in loaded]
+    return server
+
+
+def test_the_right_model_being_served_is_silent():
+    assert _p.serving_mismatch(_lmstudio(("gemma", 65_536)), "gemma") == ""
+
+
+def test_a_different_model_being_served_is_named():
+    """LM Studio can load a model on demand that leaves no room for the
+    configured one. Hermes then sends a prompt that does not fit and the
+    server answers HTTP 400 — surfaced as "malformed request", which
+    points nowhere near the cause."""
+    why = _p.serving_mismatch(_lmstudio(("big-27b", 8_192)), "gemma")
+    assert "big-27b" in why and "gemma" in why
+
+
+def test_nothing_loaded_warns_about_on_demand_loading():
+    why = _p.serving_mismatch(_lmstudio(), "gemma")
+    assert "nothing is loaded" in why.lower()
+    assert str(_p.MIN_CONTEXT_WINDOW) in why.replace(",", "")
+
+
+def test_an_unreachable_or_ollama_server_says_nothing():
+    down = _p.LocalServer("LM Studio", "lmstudio", "x")
+    assert _p.serving_mismatch(down, "gemma") == ""
+    ollama = _lmstudio(("llama", 131_072))
+    ollama.name, ollama.provider_key = "Ollama", "ollama"
+    assert _p.serving_mismatch(ollama, "gemma") == ""
+
+
+def test_no_configured_model_is_not_a_mismatch():
+    assert _p.serving_mismatch(_lmstudio(("gemma", 65_536)), "") == ""

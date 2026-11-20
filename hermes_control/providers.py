@@ -296,20 +296,23 @@ def lms_reload(model: str, context: int = RELOAD_CONTEXT,
                        f"once to install it, or reload the model in the app.")
     run = functools.partial(subprocess.run, capture_output=True, text=True,
                             timeout=timeout)
-    # An unload failure is not fatal: the model may simply not be loaded.
-    run([str(LMS_CLI), "unload", model], check=False)
-    # No TTL. LM Studio's default is to unload an idle model after an
-    # hour and then **auto-load it again at its own default context** the
-    # next time something calls it — 8,192 here, far under Hermes's
-    # floor. So a model reloaded correctly breaks itself an hour later,
-    # with nothing said and no action by anyone. Loading it without a TTL
-    # is what makes the fix stay fixed.
+    # Unload everything, not just this model. On a 24 GB machine a 14 GB
+    # model that LM Studio loaded on demand leaves no room for the one
+    # actually configured, and the load fails with "insufficient system
+    # resources" — which reads as the small model being too big. An
+    # unload failure is not fatal: there may be nothing loaded.
+    run([str(LMS_CLI), "unload", "--all"], check=False)
+    # No --ttl at all, deliberately.
+    #
+    # The hourly self-break is real but it belongs to LM Studio's
+    # *just-in-time* loading: a model it loads on demand gets a one-hour
+    # TTL and comes back at the app's default context, which is under
+    # Hermes's floor. A model loaded from the CLI gets no TTL and stays.
+    # So the fix is to load it here, not to pass a TTL — and `--ttl 0`
+    # is rejected outright ("must be at least 1"), which silently sent
+    # an earlier version of this down its own fallback path.
     done = run([str(LMS_CLI), "load", model, "-c", str(context),
-                "--gpu", "max", "--ttl", "0", "-y"], check=False)
-    if done.returncode != 0 and "ttl" in (done.stderr or "").lower():
-        # Older CLIs reject --ttl rather than ignoring it.
-        done = run([str(LMS_CLI), "load", model, "-c", str(context),
-                    "--gpu", "max", "-y"], check=False)
+                "--gpu", "max", "-y"], check=False)
     if done.returncode != 0:
         detail = (done.stderr or done.stdout or "").strip().splitlines()
         return False, (detail[-1] if detail else
@@ -395,6 +398,37 @@ class Verdict:
     detail: str = ""
     fix: str = ""           # a config key to set, when there is one
     fix_value: Any = None
+
+
+def serving_mismatch(server: "LocalServer", configured: str) -> str:
+    """Why the configured model is not the one being served, if so.
+
+    LM Studio loads a model *on demand* when something asks for one that
+    is not loaded, and on a machine without room it can end up holding a
+    different, larger model instead — here a 14 GB one on a 24 GB
+    machine, at its own default 8,192-token window. Hermes then sends a
+    prompt that does not fit and the server answers HTTP 400, which
+    surfaces as "LM Studio rejected this request as malformed": true,
+    and no help at all in finding the cause.
+
+    Returns an empty string when there is nothing wrong.
+    """
+    if not configured or not server.reachable or server.is_ollama:
+        return ""
+    loaded = [m for m in server.models if m.loaded]
+    if not loaded:
+        return (f"Nothing is loaded in LM Studio, so the first turn will "
+                f"make it load {configured} on demand — at its own default "
+                f"window, which is under the {MIN_CONTEXT_WINDOW:,} Hermes "
+                f"needs. Load it here first.")
+    names = [m.name for m in loaded]
+    if configured in names:
+        return ""
+    return (f"LM Studio is serving {', '.join(names)}, not {configured}, "
+            f"which is what Hermes will ask for. Loading another model on "
+            f"demand can leave no room for this one, and a turn that does "
+            f"not fit comes back as a malformed request rather than as an "
+            f"out-of-memory error.")
 
 
 def context_verdict(model: LocalModel | None, configured_num_ctx: Any = None) -> Verdict:

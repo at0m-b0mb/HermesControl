@@ -295,12 +295,11 @@ def test_reload_unloads_first_then_loads_at_the_floor(monkeypatch):
     monkeypatch.setattr(providers, "probe_lmstudio", lambda *a, **k: _served())
     ok, _ = providers.lms_reload("m", 65_536)
     assert ok
-    assert calls[0][1:] == ["unload", "m"]
-    # No TTL: LM Studio's default unloads an idle model after an hour and
-    # auto-loads it again at *its* default context, which is under the
-    # floor — so a correct reload breaks itself an hour later.
-    assert calls[1][1:] == ["load", "m", "-c", "65536", "--gpu", "max",
-                            "--ttl", "0", "-y"]
+    assert calls[0][1:] == ["unload", "--all"]
+    # No --ttl: a CLI-loaded model has none, while one LM Studio loads
+    # on demand gets an hour and comes back under the floor. `--ttl 0`
+    # is rejected outright ("must be at least 1").
+    assert calls[1][1:] == ["load", "m", "-c", "65536", "--gpu", "max", "-y"]
 
 
 def test_reload_failure_reports_the_servers_own_words(monkeypatch):

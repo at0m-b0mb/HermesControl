@@ -165,7 +165,9 @@ The two email rows are different directions and are constantly mistaken for each
 
 ### The gap that produces
 
-A skill with an unmet prerequisite installs cleanly, appears in every listing, and fails the first time the agent reaches for it. On this machine eight of the fifty-eight were in that state, `himalaya` among them. The Skills page checks each skill's declared commands against the host and marks the ones that cannot run, because "installed" and "usable" are not the same claim.
+A skill with an unmet prerequisite installs cleanly, appears in every listing, and fails the first time the agent reaches for it. On this machine eight of the fifty-eight were in that state. The Skills page checks each skill's declared commands against the host and marks the ones that cannot run, because "installed" and "usable" are not the same claim.
+
+They are worse than inert. Asked for a reminder, the model reached for `apple-reminders` — a shell command advertised in its skills index that is not installed — rather than Hermes's own `cronjob_manage`. **A broken skill in the index out-competes a working tool**, because the broken one is named in the prompt and the working one is a tool call away. Removing the seven unrunnable ones is what made plain requests start working.
 
 ## Long conversations, and the window nobody agrees on
 
@@ -258,7 +260,7 @@ On macOS 26 (Darwin 27), Python 3.13, PySide6 6.12 / Qt 6.12, against Hermes Age
 
 - Isolated install into `~/.hermes-agent`, leaving an unrelated `~/.hermes` byte-identical by SHA-256.
 - All 11 pages render in both themes with no exceptions (`tools/shoot.py`).
-- **350 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
+- **353 tests pass**, including a functional suite that drives the real widgets, platform-simulation tests for the Windows and Linux branches, and a first-run suite that drives the app against an empty install.
 - A chat turn end to end *through the interface*: typed into the Console, streamed back, answer in the transcript, token accounting delivered to the ribbon.
 - Editing a setting and pressing Apply is asserted to reach `config.yaml`, and the original is restored.
 - Every local model's verdict is checked against what Ollama actually reports, and a model under the floor is asserted to be unselectable.
